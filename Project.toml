@@ -1,12 +1,9 @@
-name = "Example"
-uuid = "7876af07-990d-54b4-ab0e-23690620f79a"
-version = "0.5.5"
+name = "QdrantClient"
+uuid = "18f42571-9ca3-47e3-9e7d-7108c8924fb3"
+authors = ["AbrJA <abraham.jaimes.mx@gmail.com>"]
+version = "0.1.0"
 
-[compat]
-julia = "1"
-
-[extras]
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-
-[targets]
-test = ["Test"]
+[deps]
+HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
+JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
+StructUtils = "ec057cc2-7a8d-4b58-b3b3-92acb9f63b42"
