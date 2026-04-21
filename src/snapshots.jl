@@ -3,101 +3,33 @@
 # ============================================================================
 
 """
-    create_snapshot(client::Client, collection::String)
+    create_snapshot(client, collection)
 
 Create a snapshot of a collection.
-
-# Arguments
-- `client::Client`: The Qdrant client
-- `collection::String`: Collection name
-
-# Returns
-Dict with snapshot information
 """
-function create_snapshot(client::Client, collection::String)
-    response = _request(
-        HTTP.post,
-        client,
-        "/collections/$collection/snapshots"
-    )
-    return _parse_response(response, Dict)
+function create_snapshot(c::Client, coll::AbstractString)
+    _rp(HTTP.post, c, "/collections/$coll/snapshots")
 end
+create_snapshot(coll::AbstractString) = create_snapshot(get_client(), coll)
 
 """
-    list_snapshots(client::Client, collection::String)
+    list_snapshots(client, collection)
 
 List all snapshots for a collection.
-
-# Arguments
-- `client::Client`: The Qdrant client
-- `collection::String`: Collection name
-
-# Returns
-Vector of SnapshotDescription objects
 """
-function list_snapshots(client::Client, collection::String)
-    response = _request(
-        HTTP.get,
-        client,
-        "/collections/$collection/snapshots"
-    )
-    parsed = _parse_response(response, Dict)
-    return parsed isa AbstractVector ? parsed : get(parsed, :snapshots, Any[])
+function list_snapshots(c::Client, coll::AbstractString)
+    result = _rp(HTTP.get, c, "/collections/$coll/snapshots")
+    result isa AbstractVector ? result : get(result, :snapshots, Any[])
 end
+list_snapshots(coll::AbstractString) = list_snapshots(get_client(), coll)
 
 """
-    delete_snapshot(client::Client, collection::String, snapshot_name::String)
+    delete_snapshot(client, collection, snapshot_name)
 
 Delete a snapshot.
-
-# Arguments
-- `client::Client`: The Qdrant client
-- `collection::String`: Collection name
-- `snapshot_name::String`: Snapshot name
-
-# Returns
-Dict with operation status
 """
-function delete_snapshot(
-    client::Client,
-    collection::String,
-    snapshot_name::String
-)
-    response = _request(
-        HTTP.delete,
-        client,
-        "/collections/$collection/snapshots/$snapshot_name"
-    )
-    return _parse_response(response, Dict)
+function delete_snapshot(c::Client, coll::AbstractString, name::AbstractString)
+    _rp(HTTP.delete, c, "/collections/$coll/snapshots/$name")
 end
-
-"""
-    recover_snapshot(client::Client, collection::String, snapshot_name::String;
-                     priority::String="large_first")
-
-Recover a collection from a snapshot.
-
-# Arguments
-- `client::Client`: The Qdrant client
-- `collection::String`: Collection name
-- `snapshot_name::String`: Snapshot name
-- `priority::String`: Recovery priority ("large_first" or "small_first")
-
-# Returns
-Dict with operation status
-"""
-function recover_snapshot(
-    client::Client,
-    collection::String,
-    snapshot_name::String;
-    priority::String="large_first"
-)
-    body = Dict("priority" => priority)
-    response = _request(
-        HTTP.put,
-        client,
-        "/collections/$collection/snapshots/recover/$snapshot_name",
-        body
-    )
-    return _parse_response(response, Dict)
-end
+delete_snapshot(coll::AbstractString, name::AbstractString) =
+    delete_snapshot(get_client(), coll, name)

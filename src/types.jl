@@ -1,88 +1,113 @@
 # ============================================================================
-# Type Definitions for Qdrant API
-# ============================================================================
-# All types are defined using StructUtils for zero-cost JSON mapping.
-# Field names and types match the OpenAPI specification exactly.
-
-"""
-    QdrantResponse{T}
-
-Generic wrapper for Qdrant API responses.
-
-# Fields
-- `time::Float64`: Time spent processing (in seconds)
-- `status::String`: Status string ("ok" for success)
-- `result::Union{T, Nothing}`: The result data (type depends on endpoint)
-"""
-Base.@kwdef struct QdrantResponse{T}
-    time::Float64
-    status::String
-    result::Union{T, Nothing} = nothing
-end
-
-# ============================================================================
-# Collections
+# Abstract Type Hierarchy
 # ============================================================================
 
 """
-    CollectionDescription
+    AbstractQdrantType
 
-Description of a collection.
+Root of the Qdrant type hierarchy. Enables generic `todict` serialization.
 """
-Base.@kwdef struct CollectionDescription
-    name::String
-end
+abstract type AbstractQdrantType end
 
 """
-    CollectionsResponse
+    AbstractConfig <: AbstractQdrantType
 
-Response for listing collections.
+Configuration types for creating/updating resources.
 """
-Base.@kwdef struct CollectionsResponse
-    collections::Vector{CollectionDescription}
-end
+abstract type AbstractConfig <: AbstractQdrantType end
 
 """
-    VectorParams
+    AbstractRequest <: AbstractQdrantType
 
-Parameters for a vector field.
+Request types for search/query/recommend/discover endpoints.
 """
-Base.@kwdef struct VectorParams
+abstract type AbstractRequest <: AbstractQdrantType end
+
+"""
+    AbstractCondition <: AbstractQdrantType
+
+Filter condition types.
+"""
+abstract type AbstractCondition <: AbstractQdrantType end
+
+# ============================================================================
+# Distance Enum
+# ============================================================================
+
+"""
+    Distance
+
+Vector distance metric.
+
+Values: `Cosine`, `Euclid`, `Dot`, `Manhattan`
+
+# Examples
+```julia
+VectorParams(size=128, distance=Cosine)
+VectorParams(size=4, distance=Dot)
+```
+"""
+@enum Distance Cosine Euclid Dot Manhattan
+
+# ============================================================================
+# Point Identity
+# ============================================================================
+
+"""
+    PointId
+
+A unique point identifier — integer or UUID string.
+"""
+const PointId = Union{Int, String}
+
+# ============================================================================
+# Vector Parameters
+# ============================================================================
+
+"""
+    VectorParams <: AbstractConfig
+
+Configuration for a vector field in a collection.
+
+# Examples
+```julia
+VectorParams(size=128, distance=Cosine)
+VectorParams(size=4, distance=Dot, on_disk=true)
+```
+"""
+Base.@kwdef struct VectorParams <: AbstractConfig
     size::Int
-    distance::String  # "Cosine", "Euclid", "Dot", "Manhattan"
+    distance::Distance
     hnsw_config::Union{Nothing, Dict} = nothing
     quantization_config::Union{Nothing, Dict} = nothing
     on_disk::Union{Nothing, Bool} = nothing
 end
 
 """
-    VectorParamsDiff
+    SparseVectorParams <: AbstractConfig
 
-Diff for updating vector parameters (all fields optional).
+Configuration for sparse vector fields.
 """
-Base.@kwdef struct VectorParamsDiff
-    size::Union{Nothing, Int} = nothing
-    distance::Union{Nothing, String} = nothing
-    hnsw_config::Union{Nothing, Dict} = nothing
-    quantization_config::Union{Nothing, Dict} = nothing
-    on_disk::Union{Nothing, Bool} = nothing
-end
-
-"""
-    VectorParamsSparse
-
-Parameters for sparse vectors.
-"""
-Base.@kwdef struct VectorParamsSparse
+Base.@kwdef struct SparseVectorParams <: AbstractConfig
     index::Bool
 end
 
-"""
-    CollectionConfig
+# ============================================================================
+# Collection Types
+# ============================================================================
 
-Configuration used when creating a collection.
 """
-Base.@kwdef struct CollectionConfig
+    CollectionConfig <: AbstractConfig
+
+Configuration for creating a collection.
+
+# Examples
+```julia
+CollectionConfig(vectors=VectorParams(size=128, distance=Cosine))
+CollectionConfig(vectors=VectorParams(size=4, distance=Dot), on_disk_payload=true)
+```
+"""
+Base.@kwdef struct CollectionConfig <: AbstractConfig
     vectors::Union{VectorParams, Dict}
     sparse_vectors::Union{Nothing, Dict} = nothing
     shard_number::Union{Nothing, Int} = nothing
@@ -95,166 +120,62 @@ Base.@kwdef struct CollectionConfig
     init_from::Union{Nothing, Dict} = nothing
 end
 
-const CreateCollection = CollectionConfig
-
 """
-    CollectionUpdate
+    CollectionUpdate <: AbstractConfig
 
-Patch payload used when updating a collection.
+Patch payload for updating collection parameters.
 """
-Base.@kwdef struct CollectionUpdate
+Base.@kwdef struct CollectionUpdate <: AbstractConfig
     optimizers_config::Union{Nothing, Dict} = nothing
     params::Union{Nothing, Dict} = nothing
 end
 
-const UpdateCollection = CollectionUpdate
-
-"""
-    CollectionInfo
-
-Information about a collection.
-"""
-Base.@kwdef struct CollectionInfo
-    name::String
-    points_count::Int
-    vectors_count::Union{Int, Dict}
-    segments_count::Int
-    status::String  # "green", "yellow", "red"
-    config::Dict
-    payload_schema::Union{Nothing, Dict} = nothing
-    points_count_details::Union{Nothing, Dict} = nothing
-end
-
 # ============================================================================
-# Points & Vectors
+# Points
 # ============================================================================
 
 """
-    PointId
+    PointStruct <: AbstractQdrantType
 
-A unique point identifier (integer or UUID).
-"""
-const PointId = Union{Int, String}
+A point with id, vector(s), and optional payload.
 
+# Examples
+```julia
+PointStruct(id=1, vector=Float32[0.1, 0.2, 0.3], payload=Dict("label" => "cat"))
+```
 """
-    PointStruct
-
-A point with vector and optional payload.
-"""
-Base.@kwdef struct PointStruct
+Base.@kwdef struct PointStruct <: AbstractQdrantType
     id::PointId
     vector::Union{Vector{Float32}, Dict{String, Vector{Float32}}}
     payload::Union{Nothing, Dict} = nothing
 end
 
-"""
-    PointStructDense
-
-Dense vector point.
-"""
-Base.@kwdef struct PointStructDense
-    id::PointId
-    vector::Vector{Float32}
-    payload::Union{Nothing, Dict} = nothing
-end
-
-"""
-    PointStructSparse
-
-Sparse vector point.
-"""
-Base.@kwdef struct PointStructSparse
-    id::PointId
-    vector::Dict  # {indices: Int[], values: Float32[]}
-    payload::Union{Nothing, Dict} = nothing
-end
-
-"""
-    PointStructMultiVector
-
-Multi-vector point (multiple dense vectors).
-"""
-Base.@kwdef struct PointStructMultiVector
-    id::PointId
-    vector::Dict{String, Vector{Float32}}
-    payload::Union{Nothing, Dict} = nothing
-end
-
-"""
-    PointStructNamedVectors
-
-Named vectors point.
-"""
-Base.@kwdef struct PointStructNamedVectors
-    id::PointId
-    vector::Dict{String, Union{Vector{Float32}, Dict}}
-    payload::Union{Nothing, Dict} = nothing
-end
-
-"""
-    PointsSelector
-
-Selector for which points to update/delete.
-"""
-const PointsSelector = Union{
-    NamedTuple{(:points,), Tuple{Vector{PointId}}},  # PointIdsList
-    Dict{Symbol, Any}  # Filter
-}
-
-"""
-    PointIdsList
-
-Selector for specific points by ID.
-"""
-Base.@kwdef struct PointIdsList
-    points::Vector{PointId}
-end
-
-"""
-    FilterSelector
-
-Filter conditions for point selection.
-"""
-Base.@kwdef struct FilterSelector
-    filter::Dict
-end
-
-"""
-    AllVariants
-
-Match all points.
-"""
-struct AllVariants
-end
-
-"""
-    Payload
-
-Point payload data (arbitrary JSON).
-"""
-const Payload = Dict{String, Any}
-
 # ============================================================================
-# Filters
+# Filters & Conditions
 # ============================================================================
 
 """
-    Filter
+    Filter <: AbstractCondition
 
-Filter conditions for searching/filtering points.
+Compound filter with `must`, `should`, `must_not` clauses.
+
+# Examples
+```julia
+Filter(must=[Dict("key" => "color", "match" => Dict("value" => "red"))])
+```
 """
-Base.@kwdef struct Filter
+Base.@kwdef struct Filter <: AbstractCondition
     must::Union{Nothing, Vector{Dict}} = nothing
     should::Union{Nothing, Vector{Dict}} = nothing
     must_not::Union{Nothing, Vector{Dict}} = nothing
 end
 
 """
-    FieldCondition
+    FieldCondition <: AbstractCondition
 
-Condition on a specific field.
+Condition on a specific payload field.
 """
-Base.@kwdef struct FieldCondition
+Base.@kwdef struct FieldCondition <: AbstractCondition
     key::String
     range::Union{Nothing, Dict} = nothing
     match::Union{Nothing, Dict} = nothing
@@ -265,144 +186,72 @@ Base.@kwdef struct FieldCondition
 end
 
 """
-    MatchValue
+    MatchValue <: AbstractCondition
 
 Match a specific value.
 """
-Base.@kwdef struct MatchValue
-    value::Union{String, Int, Float32, Bool}
+Base.@kwdef struct MatchValue <: AbstractCondition
+    value::Union{String, Int, Float64, Bool}
 end
 
 """
-    MatchFilter
-
-Match multiple values.
-"""
-Base.@kwdef struct MatchFilter
-    any::Union{Nothing, Vector{Union{String, Int, Float32, Bool}}} = nothing
-    except::Union{Nothing, Vector{Union{String, Int, Float32, Bool}}} = nothing
-end
-
-"""
-    MatchAnyFilter
-
-Match if value equals any in list.
-"""
-Base.@kwdef struct MatchAnyFilter
-    any::Vector{Union{String, Int, Float32, Bool}}
-end
-
-"""
-    MatchExceptFilter
-
-Match unless value is in except list.
-"""
-Base.@kwdef struct MatchExceptFilter
-    except::Vector{Union{String, Int, Float32, Bool}}
-end
-
-"""
-    RangeFilter
+    RangeCondition <: AbstractCondition
 
 Range comparison filter.
 """
-Base.@kwdef struct RangeFilter
-    gte::Union{Nothing, Float32} = nothing
-    gt::Union{Nothing, Float32} = nothing
-    lte::Union{Nothing, Float32} = nothing
-    lt::Union{Nothing, Float32} = nothing
+Base.@kwdef struct RangeCondition <: AbstractCondition
+    gte::Union{Nothing, Float64} = nothing
+    gt::Union{Nothing, Float64} = nothing
+    lte::Union{Nothing, Float64} = nothing
+    lt::Union{Nothing, Float64} = nothing
 end
 
 """
-    GeoBoundingBox
+    HasIdCondition <: AbstractCondition
 
-Geographic bounding box filter.
+Filter points by ID.
 """
-Base.@kwdef struct GeoBoundingBox
-    bottom_right::Dict  # {lat: Float, lon: Float}
-    top_left::Dict     # {lat: Float, lon: Float}
-end
-
-"""
-    GeoRadius
-
-Geographic radius filter.
-"""
-Base.@kwdef struct GeoRadius
-    center::Dict  # {lat: Float, lon: Float}
-    radius_meters::Float32
-end
-
-"""
-    GeoPolygon
-
-Geographic polygon filter.
-"""
-Base.@kwdef struct GeoPolygon
-    exterior::Vector{Dict}  # [{lat: Float, lon: Float}, ...]
-    interiors::Union{Nothing, Vector{Vector{Dict}}} = nothing
-end
-
-"""
-    GeoFilter
-
-Geographic filter (one of bounding box, radius, or polygon).
-"""
-Base.@kwdef struct GeoFilter
-    geo_bounding_box::Union{Nothing, GeoBoundingBox} = nothing
-    geo_radius::Union{Nothing, GeoRadius} = nothing
-    geo_polygon::Union{Nothing, GeoPolygon} = nothing
-end
-
-"""
-    HasIdFilter
-
-Filter points with specific IDs.
-"""
-Base.@kwdef struct HasIdFilter
+Base.@kwdef struct HasIdCondition <: AbstractCondition
     has_id::Vector{PointId}
 end
 
 """
-    IsEmptyFilter
+    IsEmptyCondition <: AbstractCondition
 
-Filter empty fields.
+Filter for empty fields.
 """
-Base.@kwdef struct IsEmptyFilter
-    is_empty::Dict  # {key: String}
+Base.@kwdef struct IsEmptyCondition <: AbstractCondition
+    is_empty::Dict
 end
 
 """
-    IsNullFilter
+    IsNullCondition <: AbstractCondition
 
-Filter null fields.
+Filter for null fields.
 """
-Base.@kwdef struct IsNullFilter
-    is_null::Dict  # {key: String}
-end
-
-"""
-    NestedFilter
-
-Nested object filter.
-"""
-Base.@kwdef struct NestedFilter
-    nested::Dict  # {key: String, filter: Filter}
+Base.@kwdef struct IsNullCondition <: AbstractCondition
+    is_null::Dict
 end
 
 # ============================================================================
-# Search, Recommend, Query, Discover
+# Search / Recommend / Query / Discover Requests
 # ============================================================================
 
 """
-    SearchRequest
+    SearchRequest <: AbstractRequest
 
-Request for searching similar vectors.
+Nearest-neighbor search request.
+
+# Examples
+```julia
+SearchRequest(vector=Float32[1,0,0,0], limit=10)
+SearchRequest(vector=Float32[1,0,0,0], limit=5, with_payload=true)
+```
 """
-Base.@kwdef struct SearchRequest
-    vector::Union{Vector{Float32}, String, Dict}  # vector name for sparse
-    filter::Union{Nothing, Filter} = nothing
+Base.@kwdef struct SearchRequest <: AbstractRequest
+    vector::Union{Vector{Float32}, String, Dict}
     limit::Int
+    filter::Union{Nothing, Filter} = nothing
     offset::Union{Nothing, Int} = nothing
     with_payload::Union{Nothing, Bool, Vector{String}} = nothing
     with_vector::Union{Nothing, Bool, Vector{String}} = nothing
@@ -413,37 +262,15 @@ Base.@kwdef struct SearchRequest
 end
 
 """
-    ScoredPoint
+    RecommendRequest <: AbstractRequest
 
-A point with its search score.
+Recommendation request based on positive/negative examples.
 """
-Base.@kwdef struct ScoredPoint
-    id::PointId
-    score::Float32
-    version::Union{Nothing, Int} = nothing
-    payload::Union{Nothing, Dict} = nothing
-    vector::Union{Nothing, Vector{Float32}, Dict{String, Vector{Float32}}} = nothing
-end
-
-"""
-    SearchResponse
-
-Response from search endpoint.
-"""
-Base.@kwdef struct SearchResponse
-    points::Vector{ScoredPoint}
-end
-
-"""
-    RecommendRequest
-
-Request for recommendation.
-"""
-Base.@kwdef struct RecommendRequest
+Base.@kwdef struct RecommendRequest <: AbstractRequest
     positive::Union{Nothing, Vector{PointId}} = nothing
     negative::Union{Nothing, Vector{PointId}} = nothing
-    filter::Union{Nothing, Filter} = nothing
     limit::Int
+    filter::Union{Nothing, Filter} = nothing
     offset::Union{Nothing, Int} = nothing
     with_payload::Union{Nothing, Bool, Vector{String}} = nothing
     with_vector::Union{Nothing, Bool, Vector{String}} = nothing
@@ -454,36 +281,14 @@ Base.@kwdef struct RecommendRequest
 end
 
 """
-    RecommendedPoint
-
-A recommended point with score.
-"""
-Base.@kwdef struct RecommendedPoint
-    id::PointId
-    score::Union{Nothing, Float32} = nothing
-    version::Union{Nothing, Int} = nothing
-    payload::Union{Nothing, Dict} = nothing
-    vector::Union{Nothing, Vector{Float32}, Dict{String, Vector{Float32}}} = nothing
-end
-
-"""
-    RecommendResponse
-
-Response from recommend endpoint.
-"""
-Base.@kwdef struct RecommendResponse
-    points::Vector{RecommendedPoint}
-end
-
-"""
-    QueryRequest
+    QueryRequest <: AbstractRequest
 
 Advanced query request.
 """
-Base.@kwdef struct QueryRequest
-    query::Union{Vector{Float32}, String, Dict}  # vector or query object
-    filter::Union{Nothing, Filter} = nothing
+Base.@kwdef struct QueryRequest <: AbstractRequest
+    query::Union{Vector{Float32}, String, Dict}
     limit::Int
+    filter::Union{Nothing, Filter} = nothing
     offset::Union{Nothing, Int} = nothing
     with_payload::Union{Nothing, Bool, Vector{String}} = nothing
     with_vector::Union{Nothing, Bool, Vector{String}} = nothing
@@ -491,289 +296,16 @@ Base.@kwdef struct QueryRequest
 end
 
 """
-    QueryPoint
+    DiscoverRequest <: AbstractRequest
 
-A point returned from query.
+Discovery request — find points near a target with optional context.
 """
-Base.@kwdef struct QueryPoint
-    id::PointId
-    score::Union{Nothing, Float32} = nothing
-    version::Union{Nothing, Int} = nothing
-    payload::Union{Nothing, Dict} = nothing
-    vector::Union{Nothing, Vector{Float32}, Dict{String, Vector{Float32}}} = nothing
-end
-
-"""
-    QueryResponse
-
-Response from query endpoint.
-"""
-Base.@kwdef struct QueryResponse
-    points::Vector{QueryPoint}
-end
-
-"""
-    DiscoverRequest
-
-Discovery request (find points similar to target point).
-"""
-Base.@kwdef struct DiscoverRequest
+Base.@kwdef struct DiscoverRequest <: AbstractRequest
     target::Union{PointId, Vector{Float32}, Dict}
-    context::Union{Nothing, Vector{Dict}} = nothing  # [{positive: PointId, negative: PointId}]
-    filter::Union{Nothing, Filter} = nothing
     limit::Int
+    context::Union{Nothing, Vector{Dict}} = nothing
+    filter::Union{Nothing, Filter} = nothing
     offset::Union{Nothing, Int} = nothing
     with_payload::Union{Nothing, Bool, Vector{String}} = nothing
     with_vector::Union{Nothing, Bool, Vector{String}} = nothing
-end
-
-"""
-    DiscoveredPoint
-
-A discovered point.
-"""
-Base.@kwdef struct DiscoveredPoint
-    id::PointId
-    score::Union{Nothing, Float32} = nothing
-    version::Union{Nothing, Int} = nothing
-    payload::Union{Nothing, Dict} = nothing
-    vector::Union{Nothing, Vector{Float32}, Dict{String, Vector{Float32}}} = nothing
-end
-
-"""
-    DiscoverResponse
-
-Response from discover endpoint.
-"""
-Base.@kwdef struct DiscoverResponse
-    points::Vector{DiscoveredPoint}
-end
-
-# ============================================================================
-# Count, Scroll
-# ============================================================================
-
-"""
-    CountRequest
-
-Request for counting points.
-"""
-Base.@kwdef struct CountRequest
-    filter::Union{Nothing, Filter} = nothing
-    exact::Union{Nothing, Bool} = nothing
-end
-
-"""
-    CountResponse
-
-Response from count endpoint.
-"""
-Base.@kwdef struct CountResponse
-    count::Int
-end
-
-"""
-    ScrollRequest
-
-Request for scrolling through points.
-"""
-Base.@kwdef struct ScrollRequest
-    filter::Union{Nothing, Filter} = nothing
-    limit::Union{Nothing, Int} = nothing
-    offset::Union{Nothing, String} = nothing
-    with_payload::Union{Nothing, Bool, Vector{String}} = nothing
-    with_vector::Union{Nothing, Bool, Vector{String}} = nothing
-end
-
-"""
-    ScrollResponse
-
-Response from scroll endpoint.
-"""
-Base.@kwdef struct ScrollResponse
-    points::Vector{PointStruct}
-    next_page_offset::Union{Nothing, String} = nothing
-end
-
-# ============================================================================
-# Batch Operations
-# ============================================================================
-
-"""
-    UpsertOperation
-
-Upsert (insert or update) points.
-"""
-Base.@kwdef struct UpsertOperation
-    upsert::Dict  # {points: PointStruct[], ordering: String}
-end
-
-"""
-    DeleteOperation
-
-Delete points.
-"""
-Base.@kwdef struct DeleteOperation
-    delete::Dict  # {points: PointId[]} or {filter: Filter}
-end
-
-"""
-    SetPayloadOperation
-
-Set payload for points.
-"""
-Base.@kwdef struct SetPayloadOperation
-    set_payload::Dict  # {payload: Dict, points: PointId[]} or {..., filter: Filter}
-end
-
-"""
-    DeletePayloadOperation
-
-Delete payload fields from points.
-"""
-Base.@kwdef struct DeletePayloadOperation
-    delete_payload::Dict  # {keys: String[], points: PointId[]} or {..., filter: Filter}
-end
-
-"""
-    ClearPayloadOperation
-
-Clear all payload from points.
-"""
-Base.@kwdef struct ClearPayloadOperation
-    clear_payload::Dict  # {points: PointId[]} or {filter: Filter}
-end
-
-"""
-    UpdateVectorsOperation
-
-Update vectors for points.
-"""
-Base.@kwdef struct UpdateVectorsOperation
-    update_vectors::Dict  # {points: PointStruct[], filter?: Filter}
-end
-
-"""
-    DeleteVectorsOperation
-
-Delete vectors from points.
-"""
-Base.@kwdef struct DeleteVectorsOperation
-    delete_vectors::Dict  # {vector_names: String[], points: PointId[]} or {..., filter: Filter}
-end
-
-"""
-    UpdateStatusOperation
-
-Update operation status.
-"""
-Base.@kwdef struct UpdateStatusOperation
-    status::String
-end
-
-"""
-    OperationStatus
-
-Status of a batch operation.
-"""
-Base.@kwdef struct OperationStatus
-    operation_id::Int
-    status::String  # "acknowledged", "completed", "failed"
-    error::Union{Nothing, String} = nothing
-end
-
-"""
-    BatchVectorStruct
-
-Batch vector for multi-vector operations.
-"""
-Base.@kwdef struct BatchVectorStruct
-    ids::Vector{PointId}
-    vectors::Vector{Union{Vector{Float32}, Dict{String, Vector{Float32}}}}
-    payloads::Union{Nothing, Vector{Dict}} = nothing
-end
-
-"""
-    Batch
-
-Batch request for multiple operations.
-"""
-Base.@kwdef struct Batch
-    operations::Vector{Dict}
-end
-
-# ============================================================================
-# Snapshots
-# ============================================================================
-
-"""
-    SnapshotDescription
-
-Description of a snapshot.
-"""
-Base.@kwdef struct SnapshotDescription
-    name::String
-    creation_time::Union{Nothing, String} = nothing
-    size::Union{Nothing, Int} = nothing
-    checksum::Union{Nothing, String} = nothing
-end
-
-# ============================================================================
-# Distributed & Cluster
-# ============================================================================
-
-"""
-    ClusterStatus
-
-Status of the cluster.
-"""
-Base.@kwdef struct ClusterStatus
-    status::String  # "enabled", "disabled"
-    peers::Union{Dict, Vector}
-    peer_id::Union{Nothing, Int} = nothing
-    consensus::Union{Nothing, Dict} = nothing
-end
-
-"""
-    PeerInfo
-
-Information about a cluster peer.
-"""
-Base.@kwdef struct PeerInfo
-    peer_id::Int
-    uri::String
-    state::String  # "active", "inactive"
-end
-
-"""
-    ConsensusThreadStatus
-
-Status of consensus thread.
-"""
-Base.@kwdef struct ConsensusThreadStatus
-    term::Int
-    voted_for::Union{Nothing, Int} = nothing
-    log_size::Union{Nothing, Int} = nothing
-end
-
-# ============================================================================
-# Service (Health, Metrics, Telemetry)
-# ============================================================================
-
-"""
-    TelemetryData
-
-Telemetry information.
-"""
-Base.@kwdef struct TelemetryData
-    version::String
-end
-
-"""
-    MetricsData
-
-Metrics information.
-"""
-Base.@kwdef struct MetricsData
-    data::Union{String, Dict}
 end

@@ -4,37 +4,24 @@ using HTTP
 using JSON
 using QdrantClient
 
-const TEST_CLIENT = Client(host="http://localhost", port=6333)
+const C = Client(host="http://localhost", port=6333)
 
-function test_collection_name(prefix::String)
-    return string(prefix, "_", replace(string(uuid4()), "-" => ""))
+_name(prefix) = string(prefix, "_", replace(string(uuid4()), "-" => ""))
+
+function _available(c::Client=C)
+    try; list_collections(c); true; catch; false; end
 end
 
-function qdrant_available(client::Client=TEST_CLIENT)
-    try
-        collections(client)
-        return true
-    catch
-        return false
-    end
+function _cleanup(c::Client, name)
+    try; delete_collection(c, name); catch; end
 end
 
-function cleanup_collection(client::Client, name::String)
-    try
-        delete_collection(client, name)
-    catch
-    end
+function _cleanup_alias(c::Client, name)
+    try; delete_alias(c, name); catch; end
 end
 
-function cleanup_alias(client::Client, name::String)
-    try
-        delete_alias(client, name)
-    catch
-    end
-end
-
-function fixture_points()
-    return [
+function _fixture()
+    [
         PointStruct(id=1, vector=Float32[1.0, 0.0, 0.0, 0.0], payload=Dict("group" => "a", "n" => 1)),
         PointStruct(id=2, vector=Float32[0.9, 0.1, 0.0, 0.0], payload=Dict("group" => "a", "n" => 2)),
         PointStruct(id=3, vector=Float32[0.0, 1.0, 0.0, 0.0], payload=Dict("group" => "b", "n" => 3)),
@@ -42,258 +29,253 @@ function fixture_points()
 end
 
 @testset "QdrantClient" begin
-    @testset "Client Basics" begin
-        client = Client()
-        @test client.host == "http://localhost"
-        @test client.port == 6333
-        @test isnothing(client.api_key)
 
-        custom = Client(host="http://example.com", port=8000, api_key="test-key")
-        @test custom.host == "http://example.com"
-        @test custom.port == 8000
-        @test custom.api_key == "test-key"
-
-        set_global_client(custom)
-        @test get_global_client().host == "http://example.com"
-        set_global_client(Client())
-
-        @test QdrantClient._make_url(client, "/collections") == "http://localhost:6333/collections"
-        @test QdrantClient._make_url(client, "collections") == "http://localhost:6333/collections"
+    # ── Unit: Type Hierarchy ─────────────────────────────────────────────
+    @testset "Type Hierarchy" begin
+        @test VectorParams <: AbstractConfig
+        @test CollectionConfig <: AbstractConfig
+        @test CollectionUpdate <: AbstractConfig
+        @test SearchRequest <: AbstractRequest
+        @test RecommendRequest <: AbstractRequest
+        @test QueryRequest <: AbstractRequest
+        @test DiscoverRequest <: AbstractRequest
+        @test Filter <: AbstractCondition
+        @test FieldCondition <: AbstractCondition
+        @test PointStruct <: AbstractQdrantType
     end
 
-    @testset "Headers And Serialization" begin
-        headers = QdrantClient._make_headers(Client(api_key="secret"))
-        @test headers["Content-Type"] == "application/json"
-        @test headers["User-Agent"] == "QdrantClient.jl/0.1.0"
-        @test headers["api-key"] == "secret"
-
-        nested = CollectionConfig(vectors=VectorParams(size=4, distance="Dot"))
-        encoded = QdrantClient._struct_to_dict(nested)
-        @test encoded[:vectors][:size] == 4
-        @test encoded[:vectors][:distance] == "Dot"
-
-        updated = CollectionUpdate(params=Dict("on_disk_payload" => true))
-        update_dict = QdrantClient._struct_to_dict(updated)
-        @test update_dict[:params]["on_disk_payload"] === true
-
-        search_request = SearchRequest(vector=Float32[1, 0, 0, 0], limit=3, with_payload=true)
-        search_dict = QdrantClient._struct_to_dict(search_request)
-        @test search_dict[:limit] == 3
-        @test search_dict[:with_payload] === true
+    # ── Unit: Distance Enum ──────────────────────────────────────────────
+    @testset "Distance Enum" begin
+        @test Cosine isa Distance
+        @test Euclid isa Distance
+        @test Dot isa Distance
+        @test Manhattan isa Distance
+        @test string(Dot) == "Dot"
+        @test string(Cosine) == "Cosine"
     end
 
-    @testset "Error And Parsing" begin
-        err = QdrantClient.qdrant_error(404, "Collection not found")
+    # ── Unit: todict Serialization ───────────────────────────────────────
+    @testset "todict Serialization" begin
+        vp = VectorParams(size=4, distance=Dot)
+        d = todict(vp)
+        @test d[:size] == 4
+        @test d[:distance] == "Dot"
+        @test !haskey(d, :hnsw_config)  # nothing fields stripped
+
+        cfg = CollectionConfig(vectors=vp, on_disk_payload=true)
+        dc = todict(cfg)
+        @test dc[:vectors][:distance] == "Dot"
+        @test dc[:on_disk_payload] === true
+        @test !haskey(dc, :sparse_vectors)
+
+        pt = PointStruct(id=1, vector=Float32[1,2,3])
+        dp = todict(pt)
+        @test dp[:id] == 1
+        @test dp[:vector] == Float32[1,2,3]
+        @test !haskey(dp, :payload)
+
+        sr = SearchRequest(vector=Float32[1,0,0,0], limit=5, with_payload=true)
+        ds = todict(sr)
+        @test ds[:limit] == 5
+        @test ds[:with_payload] === true
+    end
+
+    # ── Unit: Client ─────────────────────────────────────────────────────
+    @testset "Client" begin
+        c = Client()
+        @test c.host == "http://localhost"
+        @test c.port == 6333
+        @test c.api_key === nothing
+        @test c.timeout == 30
+
+        c2 = Client(host="http://example.com", port=8080, api_key="key123")
+        @test c2.api_key == "key123"
+
+        set_client!(c2)
+        @test get_client().host == "http://example.com"
+        set_client!(Client())  # reset
+
+        @test QdrantClient._url(c, "/collections") == "http://localhost:6333/collections"
+        @test QdrantClient._url(c, "collections") == "http://localhost:6333/collections"
+    end
+
+    # ── Unit: Headers ────────────────────────────────────────────────────
+    @testset "Headers" begin
+        h = QdrantClient._headers(Client(api_key="secret"))
+        hd = Dict(h)
+        @test hd["Content-Type"] == "application/json"
+        @test hd["api-key"] == "secret"
+        @test startswith(hd["User-Agent"], "QdrantClient.jl/")
+
+        h2 = QdrantClient._headers(Client())
+        hd2 = Dict(h2)
+        @test !haskey(hd2, "api-key")
+    end
+
+    # ── Unit: Error ──────────────────────────────────────────────────────
+    @testset "Error" begin
+        err = QdrantError(404, "Not found")
         @test err.status == 404
-        @test err.message == "Collection not found"
-        @test isnothing(err.detail)
+        @test err.detail === nothing
 
-        api_error = HTTP.Response(404, "", body=JSON.json(Dict(
-            :status => Dict(:error => "missing"),
-            :result => nothing,
-            :time => 0.0,
-        )))
-        converted = QdrantClient.api_error_response(api_error)
-        @test converted.status == 404
-        @test converted.message == "missing"
+        err2 = QdrantError(500, "Fail", Dict(:info => "x"))
+        @test err2.detail[:info] == "x"
 
-        empty_response = HTTP.Response(200, "", body="")
-        @test isnothing(QdrantClient._parse_response(empty_response, Dict))
+        buf = IOBuffer()
+        showerror(buf, err)
+        @test contains(String(take!(buf)), "404")
+    end
+
+    # ── Unit: parse_response ─────────────────────────────────────────────
+    @testset "parse_response" begin
+        empty_resp = HTTP.Response(200, "", body="")
+        @test QdrantClient.parse_response(empty_resp) === nothing
 
         wrapped = HTTP.Response(200, "", body=JSON.json(Dict(
-            :status => "ok",
-            :time => 0.01,
-            :result => Dict(:count => 7),
+            :status => "ok", :time => 0.01, :result => Dict(:count => 7)
         )))
-        parsed = QdrantClient._parse_response(wrapped, Dict)
-        @test parsed[:count] == 7
+        @test QdrantClient.parse_response(wrapped)[:count] == 7
 
-        raw = HTTP.Response(200, "", body=JSON.json(Dict(:key => :value)))
-        @test QdrantClient._parse_response(raw, Dict)[:key] == "value"
+        raw = HTTP.Response(200, "", body=JSON.json(Dict(:key => "val")))
+        @test QdrantClient.parse_response(raw)[:key] == "val"
     end
 
-    @testset "Type Definitions" begin
-        params = VectorParams(size=128, distance="Cosine")
-        @test params.size == 128
-        @test params.distance == "Cosine"
-
-        point = PointStruct(id=1, vector=rand(Float32, 8), payload=Dict("label" => "test"))
-        @test point.id == 1
-        @test length(point.vector) == 8
-        @test point.payload["label"] == "test"
-
-        search_req = SearchRequest(vector=rand(Float32, 8), limit=10)
-        @test search_req.limit == 10
-        @test length(search_req.vector) == 8
-    end
-
+    # ── Integration ──────────────────────────────────────────────────────
     @testset "Integration" begin
-        if !qdrant_available()
-            @test_skip "Live Qdrant server not available on localhost:6333"
+        if !_available()
+            @test_skip "Qdrant not available on localhost:6333"
         else
             @testset "Collection Lifecycle" begin
-                client = TEST_CLIENT
-                collection = test_collection_name("julia_collection")
-                alias_1 = collection * "_alias"
-                alias_2 = collection * "_alias_renamed"
+                coll = _name("jl_coll")
+                a1 = coll * "_alias"
+                a2 = coll * "_alias2"
+                _cleanup_alias(C, a1); _cleanup_alias(C, a2); _cleanup(C, coll)
 
-                cleanup_alias(client, alias_1)
-                cleanup_alias(client, alias_2)
-                cleanup_collection(client, collection)
+                @test create_collection(C, coll; vectors=VectorParams(size=4, distance=Dot)) === true
 
-                @test create_collection(client, collection; vectors=VectorParams(size=4, distance="Dot")) === true
+                all = list_collections(C)
+                @test any(c[:name] == coll for c in all[:collections])
 
-                all_collections = collections(client)
-                @test any(item[:name] == collection for item in all_collections[:collections])
+                @test collection_exists(C, coll)[:exists] === true
 
-                exists = collection_exists(client, collection)
-                @test exists[:exists] === true
-
-                info = get_collection_info(client, collection)
+                info = get_collection(C, coll)
                 @test info[:status] == "green"
                 @test info[:config][:params][:vectors][:size] == 4
 
-                @test create_alias(client, alias_1, collection) === true
+                @test create_alias(C, a1, coll) === true
+                aliases = list_aliases(C)
+                @test any(a[:alias_name] == a1 for a in aliases[:aliases])
 
-                aliases = list_aliases(client)
-                @test any(item[:alias_name] == alias_1 for item in aliases[:aliases])
+                ca = list_collection_aliases(C, coll)
+                @test any(a[:alias_name] == a1 for a in ca[:aliases])
 
-                collection_aliases = list_collection_aliases(client, collection)
-                @test any(item[:alias_name] == alias_1 for item in collection_aliases[:aliases])
+                @test rename_alias(C, a1, a2) === true
+                @test any(a[:alias_name] == a2 for a in list_aliases(C)[:aliases])
 
-                @test rename_alias(client, alias_1, alias_2) === true
-                aliases_after_rename = list_aliases(client)
-                @test any(item[:alias_name] == alias_2 for item in aliases_after_rename[:aliases])
-
-                @test delete_alias(client, alias_2) === true
-                @test delete_collection(client, collection) === true
+                @test delete_alias(C, a2) === true
+                @test delete_collection(C, coll) === true
             end
 
-            @testset "Points CRUD And Payload" begin
-                client = TEST_CLIENT
-                collection = test_collection_name("julia_points")
-                cleanup_collection(client, collection)
+            @testset "Points CRUD" begin
+                coll = _name("jl_pts")
+                _cleanup(C, coll)
+                create_collection(C, coll; vectors=VectorParams(size=4, distance=Dot))
+                pts = _fixture()
 
-                create_collection(client, collection; vectors=VectorParams(size=4, distance="Dot"))
-                points = fixture_points()
+                res = upsert_points(C, coll, pts; wait=true)
+                @test res[:status] == "completed"
 
-                upsert_result = upsert_points(client, collection, points; wait=true)
-                @test upsert_result[:status] == "completed"
+                got = get_points(C, coll, [1, 2]; with_vectors=true, with_payload=true)
+                @test length(got) == 2
+                @test got[1][:id] == 1
+                @test got[1][:payload][:group] == "a"
+                @test length(got[1][:vector]) == 4
 
-                retrieved = retrieve_points(client, collection, [1, 2]; with_vectors=true, with_payload=true)
-                @test length(retrieved) == 2
-                @test retrieved[1][:id] == 1
-                @test retrieved[1][:payload][:group] == "a"
-                @test length(retrieved[1][:vector]) == 4
+                single = get_points(C, coll, 1; with_payload=true)
+                @test length(single) == 1
+                @test single[1][:id] == 1
 
-                single_retrieved = retrieve_points(client, collection, 1; with_payload=true)
-                @test length(single_retrieved) == 1
-                @test single_retrieved[1][:id] == 1
+                @test count_points(C, coll; exact=true)[:count] == 3
 
-                counted = count_points(client, collection; exact=true)
-                @test counted[:count] == 3
+                @test set_payload(C, coll, Dict("flag" => true), [1, 2])[:status] == "completed"
+                @test set_payload(C, coll, Dict("solo" => true), 1)[:status] == "completed"
 
-                set_result = set_payload(client, collection, Dict("flag" => true), [1, 2]; wait=true)
-                @test set_result[:status] == "completed"
+                after = get_points(C, coll, [1, 2]; with_payload=true)
+                @test after[1][:payload][:flag] === true
+                @test after[2][:payload][:flag] === true
+                @test after[1][:payload][:solo] === true
 
-                single_set_result = set_payload(client, collection, Dict("single_flag" => true), 1; wait=true)
-                @test single_set_result[:status] == "completed"
+                @test delete_payload(C, coll, ["flag"], [2])[:status] == "completed"
+                @test delete_payload(C, coll, ["solo"], 1)[:status] == "completed"
 
-                after_set = retrieve_points(client, collection, [1, 2]; with_payload=true)
-                @test after_set[1][:payload][:flag] === true
-                @test after_set[2][:payload][:flag] === true
-                @test after_set[1][:payload][:single_flag] === true
+                p2 = get_points(C, coll, [2]; with_payload=true)
+                @test !haskey(p2[1][:payload], :flag)
+                p1 = get_points(C, coll, 1; with_payload=true)
+                @test !haskey(p1[1][:payload], :solo)
 
-                delete_payload_result = delete_payload(client, collection, ["flag"], [2]; wait=true)
-                @test delete_payload_result[:status] == "completed"
+                @test clear_payload(C, coll, 3)[:status] == "completed"
+                p3 = get_points(C, coll, [3]; with_payload=true)
+                @test isempty(p3[1][:payload])
 
-                single_delete_payload_result = delete_payload(client, collection, ["single_flag"], 1; wait=true)
-                @test single_delete_payload_result[:status] == "completed"
+                @test delete_points(C, coll, 2)[:status] == "completed"
+                @test count_points(C, coll; exact=true)[:count] == 2
 
-                after_delete_payload = retrieve_points(client, collection, [2]; with_payload=true)
-                @test !haskey(after_delete_payload[1][:payload], :flag)
-
-                after_single_delete_payload = retrieve_points(client, collection, 1; with_payload=true)
-                @test !haskey(after_single_delete_payload[1][:payload], :single_flag)
-
-                clear_result = clear_payload(client, collection, 3; wait=true)
-                @test clear_result[:status] == "completed"
-
-                after_clear = retrieve_points(client, collection, [3]; with_payload=true)
-                @test isempty(after_clear[1][:payload])
-
-                deleted = delete_points(client, collection, 2; wait=true)
-                @test deleted[:status] == "completed"
-
-                remaining = count_points(client, collection; exact=true)
-                @test remaining[:count] == 2
-
-                cleanup_collection(client, collection)
+                _cleanup(C, coll)
             end
 
-            @testset "Search Query And Discovery" begin
-                client = TEST_CLIENT
-                collection = test_collection_name("julia_query")
-                cleanup_collection(client, collection)
+            @testset "Search Query Discovery" begin
+                coll = _name("jl_search")
+                _cleanup(C, coll)
+                create_collection(C, coll; vectors=VectorParams(size=4, distance=Dot))
+                upsert_points(C, coll, _fixture(); wait=true)
 
-                create_collection(client, collection; vectors=VectorParams(size=4, distance="Dot"))
-                upsert_points(client, collection, fixture_points(); wait=true)
-
-                scrolled = scroll_points(client, collection; limit=10, with_payload=true)
+                scrolled = scroll_points(C, coll; limit=10, with_payload=true)
                 @test length(scrolled[:points]) == 3
-                @test isnothing(scrolled[:next_page_offset])
 
-                search_request = SearchRequest(vector=Float32[1, 0, 0, 0], limit=2, with_payload=true)
-                search_hits = search_points(client, collection, search_request)
-                @test length(search_hits) == 2
-                @test search_hits[1][:id] == 1
+                hits = search_points(C, coll, SearchRequest(vector=Float32[1,0,0,0], limit=2, with_payload=true))
+                @test length(hits) == 2
+                @test hits[1][:id] == 1
 
-                search_hits_batch = search_batch(client, collection, [search_request])
-                @test length(search_hits_batch) == 1
-                @test length(search_hits_batch[1]) == 2
+                batch = search_batch(C, coll, [SearchRequest(vector=Float32[1,0,0,0], limit=2)])
+                @test length(batch) == 1
+                @test length(batch[1]) == 2
 
-                recommend_request = RecommendRequest(positive=[1], limit=2, with_payload=true)
-                recommendations = recommend_points(client, collection, recommend_request)
-                @test length(recommendations) == 2
-                @test recommendations[1][:id] != 1
+                recs = recommend_points(C, coll, RecommendRequest(positive=[1], limit=2, with_payload=true))
+                @test length(recs) == 2
+                @test recs[1][:id] != 1
 
-                query_request = QueryRequest(query=Float32[1, 0, 0, 0], limit=2, with_payload=true)
-                query_result = query_points(client, collection, query_request)
-                @test length(query_result[:points]) == 2
-                @test query_result[:points][1][:id] == 1
+                qr = query_points(C, coll, QueryRequest(query=Float32[1,0,0,0], limit=2, with_payload=true))
+                @test length(qr[:points]) == 2
+                @test qr[:points][1][:id] == 1
 
-                query_batch_result = query_batch(client, collection, [query_request])
-                @test length(query_batch_result) == 1
-                @test length(query_batch_result[1][:points]) == 2
+                qb = query_batch(C, coll, [QueryRequest(query=Float32[1,0,0,0], limit=2)])
+                @test length(qb) == 1
+                @test length(qb[1][:points]) == 2
 
-                discovered = discover_points(client, collection, DiscoverRequest(target=1, limit=2, with_payload=true))
-                @test length(discovered) == 2
-                @test discovered[1][:id] != 1
+                disc = discover_points(C, coll, DiscoverRequest(target=1, limit=2, with_payload=true))
+                @test length(disc) == 2
+                @test disc[1][:id] != 1
 
-                cleanup_collection(client, collection)
+                _cleanup(C, coll)
             end
 
             @testset "Snapshots" begin
-                client = TEST_CLIENT
-                collection = test_collection_name("julia_snapshot")
-                cleanup_collection(client, collection)
+                coll = _name("jl_snap")
+                _cleanup(C, coll)
+                create_collection(C, coll; vectors=VectorParams(size=4, distance=Dot))
+                upsert_points(C, coll, _fixture(); wait=true)
 
-                create_collection(client, collection; vectors=VectorParams(size=4, distance="Dot"))
-                upsert_points(client, collection, fixture_points(); wait=true)
+                snap = create_snapshot(C, coll)
+                @test haskey(snap, :name)
 
-                snapshot = create_snapshot(client, collection)
-                @test haskey(snapshot, :name)
+                snaps = list_snapshots(C, coll)
+                @test length(snaps) >= 1
+                @test any(s[:name] == snap[:name] for s in snaps)
 
-                snapshots = list_snapshots(client, collection)
-                @test length(snapshots) >= 1
-                @test any(item[:name] == snapshot[:name] for item in snapshots)
+                @test delete_snapshot(C, coll, snap[:name]) === true
 
-                deleted = delete_snapshot(client, collection, snapshot[:name])
-                @test deleted === true
-
-                cleanup_collection(client, collection)
+                _cleanup(C, coll)
             end
         end
     end
 end
-

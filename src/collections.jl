@@ -2,261 +2,128 @@
 # Collections API
 # ============================================================================
 
-_collection_path(name::AbstractString) = "/collections/$name"
-_collection_aliases_path(name::AbstractString) = "/collections/$name/aliases"
-
-function _alias_action_body(action::AbstractString, payload::AbstractDict)
-    return Dict{String, Any}("actions" => [Dict(action => Dict(payload))])
-end
+_coll_path(name::AbstractString) = "/collections/$name"
 
 """
-    collections(client::Client)
+    list_collections(client::Client) -> Dict
 
 List all collections.
-
-# Returns
-Dict with collections information.
 """
-function collections(client::Client=get_global_client())
-    response = _request(HTTP.get, client, "/collections")
-    return _parse_response(response, Dict)
-end
+list_collections(c::Client) = _rp(HTTP.get, c, "/collections")
+list_collections() = list_collections(get_client())
 
 """
-    create_collection(client::Client, name::AbstractString, config::CollectionConfig)
+    create_collection(client, name, config::CollectionConfig)
+    create_collection(client, name; vectors, kwargs...)
 
 Create a new collection.
 
-# Arguments
-- `client::Client`: The Qdrant client
-- `name::AbstractString`: Collection name
-- `config::CollectionConfig`: Collection configuration
-
-# Returns
-Dict with operation status
+# Examples
+```julia
+create_collection(client, "demo", CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+create_collection(client, "demo"; vectors=VectorParams(size=4, distance=Dot))
+```
 """
-function create_collection(
-    client::Client,
-    name::AbstractString,
-    config::CollectionConfig
-)
-    response = _request(HTTP.put, client, _collection_path(name), QdrantClient._struct_to_dict(config))
-    return _parse_response(response, Dict)
+function create_collection(c::Client, name::AbstractString, config::CollectionConfig)
+    _rp(HTTP.put, c, _coll_path(name), todict(config))
 end
-
 create_collection(name::AbstractString, config::CollectionConfig) =
-    create_collection(get_global_client(), name, config)
-
-create_collection(client::Client, name::AbstractString; kwargs...) =
-    create_collection(client, name, CollectionConfig(; kwargs...))
-
+    create_collection(get_client(), name, config)
+create_collection(c::Client, name::AbstractString; kwargs...) =
+    create_collection(c, name, CollectionConfig(; kwargs...))
 create_collection(name::AbstractString; kwargs...) =
-    create_collection(get_global_client(), name; kwargs...)
+    create_collection(get_client(), name; kwargs...)
 
 """
-    delete_collection(client::Client, name::String)
+    delete_collection(client, name) -> Bool
 
 Delete a collection.
-
-# Arguments
-- `client::Client`: The Qdrant client
-- `name::String`: Collection name
-
-# Returns
-Dict with operation status
 """
-function delete_collection(client::Client, name::AbstractString)
-    response = _request(HTTP.delete, client, _collection_path(name))
-    return _parse_response(response, Dict)
-end
-
-delete_collection(name::AbstractString) = delete_collection(get_global_client(), name)
+delete_collection(c::Client, name::AbstractString) = _rp(HTTP.delete, c, _coll_path(name))
+delete_collection(name::AbstractString) = delete_collection(get_client(), name)
 
 """
-    collection_exists(client::Client, name::String)
+    collection_exists(client, name) -> Dict
 
 Check if a collection exists.
-
-# Arguments
-- `client::Client`: The Qdrant client
-- `name::String`: Collection name
-
-# Returns
-Dict with existence information
 """
-function collection_exists(client::Client, name::AbstractString)
-    response = _request(HTTP.get, client, string(_collection_path(name), "/exists"))
-    return _parse_response(response, Dict)
+function collection_exists(c::Client, name::AbstractString)
+    _rp(HTTP.get, c, _coll_path(name) * "/exists")
 end
-
-collection_exists(name::AbstractString) = collection_exists(get_global_client(), name)
+collection_exists(name::AbstractString) = collection_exists(get_client(), name)
 
 """
-    get_collection_info(client::Client, name::String)
+    get_collection(client, name) -> Dict
 
-Get collection information.
-
-# Arguments
-- `client::Client`: The Qdrant client
-- `name::String`: Collection name
-
-# Returns
-CollectionInfo object
+Get detailed collection information.
 """
-function get_collection_info(client::Client, name::AbstractString)
-    response = _request(HTTP.get, client, _collection_path(name))
-    return _parse_response(response, CollectionInfo)
+get_collection(c::Client, name::AbstractString) = _rp(HTTP.get, c, _coll_path(name))
+get_collection(name::AbstractString) = get_collection(get_client(), name)
+
+"""
+    update_collection(client, name, config::CollectionUpdate)
+    update_collection(client, name; kwargs...)
+
+Update collection parameters.
+"""
+function update_collection(c::Client, name::AbstractString, config::CollectionUpdate)
+    _rp(HTTP.patch, c, _coll_path(name), todict(config))
 end
-
-get_collection_info(name::AbstractString) = get_collection_info(get_global_client(), name)
-
-"""
-    update_collection(client::Client, name::AbstractString, config::CollectionUpdate)
-
-Update a collection.
-
-# Arguments
-- `client::Client`: The Qdrant client
-- `name::AbstractString`: Collection name
-- `config::CollectionUpdate`: Update configuration
-
-# Returns
-Dict with operation status
-"""
-function update_collection(
-    client::Client,
-    name::AbstractString,
-    config::CollectionUpdate
-)
-    response = _request(HTTP.patch, client, _collection_path(name), QdrantClient._struct_to_dict(config))
-    return _parse_response(response, Dict)
-end
-
 update_collection(name::AbstractString, config::CollectionUpdate) =
-    update_collection(get_global_client(), name, config)
-
-update_collection(client::Client, name::AbstractString; kwargs...) =
-    update_collection(client, name, CollectionUpdate(; kwargs...))
-
+    update_collection(get_client(), name, config)
+update_collection(c::Client, name::AbstractString; kwargs...) =
+    update_collection(c, name, CollectionUpdate(; kwargs...))
 update_collection(name::AbstractString; kwargs...) =
-    update_collection(get_global_client(), name; kwargs...)
+    update_collection(get_client(), name; kwargs...)
+
+# ── Aliases ──────────────────────────────────────────────────────────────
+
+_alias_body(action::AbstractString, payload::AbstractDict) =
+    Dict{String,Any}("actions" => [Dict(action => Dict(payload))])
 
 """
-    list_aliases(client::Client)
+    list_aliases(client) -> Dict
 
-List all collection aliases.
-
-# Arguments
-- `client::Client`: The Qdrant client
-
-# Returns
-Dict with aliases information
+List all aliases across collections.
 """
-function list_aliases(client::Client=get_global_client())
-    response = _request(HTTP.get, client, "/aliases")
-    return _parse_response(response, Dict)
-end
+list_aliases(c::Client) = _rp(HTTP.get, c, "/aliases")
+list_aliases() = list_aliases(get_client())
 
 """
-    create_alias(client::Client, alias_name::String, collection_name::String)
-
-Create a collection alias.
-
-# Arguments
-- `client::Client`: The Qdrant client
-- `alias_name::String`: Alias name
-- `collection_name::String`: Target collection name
-
-# Returns
-Dict with operation status
-"""
-function create_alias(
-    client::Client,
-    alias_name::AbstractString,
-    collection_name::AbstractString
-)
-    body = _alias_action_body(
-        "create_alias",
-        Dict(
-            "collection_name" => collection_name,
-            "alias_name" => alias_name,
-        ),
-    )
-    response = _request(HTTP.post, client, "/collections/aliases", body)
-    return _parse_response(response, Dict)
-end
-
-create_alias(alias_name::AbstractString, collection_name::AbstractString) =
-    create_alias(get_global_client(), alias_name, collection_name)
-
-"""
-    delete_alias(client::Client, alias_name::String)
-
-Delete a collection alias.
-
-# Arguments
-- `client::Client`: The Qdrant client
-- `alias_name::String`: Alias name
-
-# Returns
-Dict with operation status
-"""
-function delete_alias(client::Client, alias_name::AbstractString)
-    body = _alias_action_body("delete_alias", Dict("alias_name" => alias_name))
-    response = _request(HTTP.post, client, "/collections/aliases", body)
-    return _parse_response(response, Dict)
-end
-
-delete_alias(alias_name::AbstractString) = delete_alias(get_global_client(), alias_name)
-
-"""
-    rename_alias(client::Client, old_alias::String, new_alias::String)
-
-Rename a collection alias.
-
-# Arguments
-- `client::Client`: The Qdrant client
-- `old_alias::String`: Old alias name
-- `new_alias::String`: New alias name
-
-# Returns
-Dict with operation status
-"""
-function rename_alias(
-    client::Client,
-    old_alias::AbstractString,
-    new_alias::AbstractString
-)
-    body = _alias_action_body(
-        "rename_alias",
-        Dict(
-            "old_alias_name" => old_alias,
-            "new_alias_name" => new_alias,
-        ),
-    )
-    response = _request(HTTP.post, client, "/collections/aliases", body)
-    return _parse_response(response, Dict)
-end
-
-rename_alias(old_alias::AbstractString, new_alias::AbstractString) =
-    rename_alias(get_global_client(), old_alias, new_alias)
-
-"""
-    list_collection_aliases(client::Client, collection_name::String)
+    list_collection_aliases(client, collection) -> Dict
 
 List aliases for a specific collection.
-
-# Arguments
-- `client::Client`: The Qdrant client
-- `collection_name::String`: Collection name
-
-# Returns
-Dict with aliases for the collection
 """
-function list_collection_aliases(client::Client, collection_name::AbstractString)
-    response = _request(HTTP.get, client, _collection_aliases_path(collection_name))
-    return _parse_response(response, Dict)
-end
+list_collection_aliases(c::Client, name::AbstractString) =
+    _rp(HTTP.get, c, _coll_path(name) * "/aliases")
+list_collection_aliases(name::AbstractString) =
+    list_collection_aliases(get_client(), name)
 
-list_collection_aliases(collection_name::AbstractString) =
-    list_collection_aliases(get_global_client(), collection_name)
+"""
+    create_alias(client, alias, collection) -> Bool
+"""
+function create_alias(c::Client, alias::AbstractString, collection::AbstractString)
+    body = _alias_body("create_alias", Dict("collection_name" => collection, "alias_name" => alias))
+    _rp(HTTP.post, c, "/collections/aliases", body)
+end
+create_alias(alias::AbstractString, collection::AbstractString) =
+    create_alias(get_client(), alias, collection)
+
+"""
+    delete_alias(client, alias) -> Bool
+"""
+function delete_alias(c::Client, alias::AbstractString)
+    body = _alias_body("delete_alias", Dict("alias_name" => alias))
+    _rp(HTTP.post, c, "/collections/aliases", body)
+end
+delete_alias(alias::AbstractString) = delete_alias(get_client(), alias)
+
+"""
+    rename_alias(client, old, new) -> Bool
+"""
+function rename_alias(c::Client, old::AbstractString, new_name::AbstractString)
+    body = _alias_body("rename_alias", Dict("old_alias_name" => old, "new_alias_name" => new_name))
+    _rp(HTTP.post, c, "/collections/aliases", body)
+end
+rename_alias(old::AbstractString, new_name::AbstractString) =
+    rename_alias(get_client(), old, new_name)

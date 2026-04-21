@@ -3,53 +3,30 @@
 # ============================================================================
 
 """
-    health_check(client::Client)
+    health_check(client)
 
-Perform a health check on the Qdrant server.
-
-# Arguments
-- `client::Client`: The Qdrant client
-
-# Returns
-Dict with health status
+Check server health by probing the collections endpoint.
+Returns a Dict with `:status` ("healthy" or "unhealthy").
 """
-function health_check(client::Client=get_global_client())
+function health_check(c::Client=get_client())
     try
-        response = _request(HTTP.get, client, "/collections")
-        return Dict("status" => "healthy", "response" => _parse_response(response, Dict))
+        resp = _rp(HTTP.get, c, "/collections")
+        Dict{String,Any}("status" => "healthy", "response" => resp)
     catch e
-        return Dict("status" => "unhealthy", "error" => string(e))
+        Dict{String,Any}("status" => "unhealthy", "error" => string(e))
     end
 end
 
 """
-    get_metrics(client::Client)
+    get_metrics(client)
 
-Get metrics information from the Qdrant server.
-
-# Arguments
-- `client::Client`: The Qdrant client
-
-# Returns
-MetricsData with server metrics
+Retrieve Prometheus-format metrics from the server.
 """
-function get_metrics(client::Client=get_global_client())
-    response = _request(HTTP.get, client, "/metrics")
-    return _parse_response(response, MetricsData)
-end
+get_metrics(c::Client=get_client()) = parse_response(request(HTTP.get, c, "/metrics"))
 
 """
-    get_telemetry(client::Client)
+    get_telemetry(client)
 
-Get telemetry information from the Qdrant server.
-
-# Arguments
-- `client::Client`: The Qdrant client
-
-# Returns
-TelemetryData with server telemetry
+Retrieve telemetry data from the server.
 """
-function get_telemetry(client::Client=get_global_client())
-    response = _request(HTTP.get, client, "/telemetry")
-    return _parse_response(response, TelemetryData)
-end
+get_telemetry(c::Client=get_client()) = _rp(HTTP.get, c, "/telemetry")
