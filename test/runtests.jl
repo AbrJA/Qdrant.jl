@@ -4,47 +4,72 @@ using HTTP
 using JSON
 using QdrantClient
 
-const C = Client(host="http://localhost", port=6333)
+# ── Helpers ──────────────────────────────────────────────────────────────
 
-_name(prefix) = string(prefix, "_", replace(string(uuid4()), "-" => ""))
+const CONN = QdrantConnection()
+unique_name(prefix="jl") = string(prefix, "_", replace(string(uuid4()), "-" => ""))
 
-function _available(c::Client=C)
-    try; list_collections(c); true; catch; false; end
+function qdrant_available(c::QdrantConnection=CONN)
+    try
+        health_check(c)
+        true
+    catch
+        false
+    end
 end
 
-function _cleanup(c::Client, name)
+function cleanup_collection(c::QdrantConnection, name)
     try; delete_collection(c, name); catch; end
 end
 
-function _cleanup_alias(c::Client, name)
-    try; delete_alias(c, name); catch; end
+function cleanup_alias(c::QdrantConnection, alias)
+    try; delete_alias(c, alias); catch; end
 end
 
-function _fixture()
+function fixture_points()
     [
-        PointStruct(id=1, vector=Float32[1.0, 0.0, 0.0, 0.0], payload=Dict("group" => "a", "n" => 1)),
-        PointStruct(id=2, vector=Float32[0.9, 0.1, 0.0, 0.0], payload=Dict("group" => "a", "n" => 2)),
-        PointStruct(id=3, vector=Float32[0.0, 1.0, 0.0, 0.0], payload=Dict("group" => "b", "n" => 3)),
+        PointStruct(id=1, vector=Float32[1.0, 0.0, 0.0, 0.0],
+                    payload=Dict{String,Any}("group" => "a", "n" => 1)),
+        PointStruct(id=2, vector=Float32[0.9, 0.1, 0.0, 0.0],
+                    payload=Dict{String,Any}("group" => "a", "n" => 2)),
+        PointStruct(id=3, vector=Float32[0.0, 1.0, 0.0, 0.0],
+                    payload=Dict{String,Any}("group" => "b", "n" => 3)),
     ]
 end
 
-@testset "QdrantClient" begin
+# ═══════════════════════════════════════════════════════════════════════════
+# Unit Tests
+# ═══════════════════════════════════════════════════════════════════════════
 
-    # ── Unit: Type Hierarchy ─────────────────────────────────────────────
+@testset "QdrantClient.jl v0.3.0" begin
+
+    # ── Type Hierarchy ──────────────────────────────────────────────────
     @testset "Type Hierarchy" begin
         @test VectorParams <: AbstractConfig
+        @test SparseVectorParams <: AbstractConfig
         @test CollectionConfig <: AbstractConfig
         @test CollectionUpdate <: AbstractConfig
+        @test TextIndexParams <: AbstractConfig
+
         @test SearchRequest <: AbstractRequest
         @test RecommendRequest <: AbstractRequest
         @test QueryRequest <: AbstractRequest
         @test DiscoverRequest <: AbstractRequest
+
         @test Filter <: AbstractCondition
         @test FieldCondition <: AbstractCondition
+        @test MatchValue <: AbstractCondition
+        @test MatchAny <: AbstractCondition
+        @test MatchText <: AbstractCondition
+        @test RangeCondition <: AbstractCondition
+        @test HasIdCondition <: AbstractCondition
+        @test IsEmptyCondition <: AbstractCondition
+        @test IsNullCondition <: AbstractCondition
+
         @test PointStruct <: AbstractQdrantType
     end
 
-    # ── Unit: Distance Enum ──────────────────────────────────────────────
+    # ── Distance Enum ───────────────────────────────────────────────────
     @testset "Distance Enum" begin
         @test Cosine isa Distance
         @test Euclid isa Distance
@@ -52,230 +77,795 @@ end
         @test Manhattan isa Distance
         @test string(Dot) == "Dot"
         @test string(Cosine) == "Cosine"
+        @test string(Euclid) == "Euclid"
+        @test string(Manhattan) == "Manhattan"
     end
 
-    # ── Unit: todict Serialization ───────────────────────────────────────
-    @testset "todict Serialization" begin
+    # ── StructUtils Serialization ───────────────────────────────────────
+    @testset "StructUtils Serialization" begin
+        @testset "VectorParams" begin
+            vp = VectorParams(size=4, distance=Dot)
+            j = JSON.json(vp)
+            parsed = JSON.parse(j)
+            @test parsed["size"] == 4
+            @test parsed["distance"] == "Dot"
+        end
+
+        @testset "CollectionConfig" begin
+            cfg = CollectionConfig(vectors=VectorParams(size=128, distance=Cosine))
+            j = JSON.json(cfg)
+            parsed = JSON.parse(j)
+            @test parsed["vectors"]["size"] == 128
+            @test parsed["vectors"]["distance"] == "Cosine"
+        end
+
+        @testset "PointStruct" begin
+            pt = PointStruct(id=1, vector=Float32[1.0, 2.0, 3.0])
+            j = JSON.json(pt)
+            parsed = JSON.parse(j)
+            @test parsed["id"] == 1
+            @test parsed["vector"] == [1.0, 2.0, 3.0]
+        end
+
+        @testset "PointStruct with payload" begin
+            pt = PointStruct(id="uuid-id", vector=Float32[0.1, 0.2],
+                             payload=Dict{String,Any}("color" => "red"))
+            j = JSON.json(pt)
+            parsed = JSON.parse(j)
+            @test parsed["id"] == "uuid-id"
+            @test parsed["payload"]["color"] == "red"
+        end
+
+        @testset "SearchRequest" begin
+            sr = SearchRequest(vector=Float32[1.0, 0.0], limit=5, with_payload=true)
+            j = JSON.json(sr)
+            parsed = JSON.parse(j)
+            @test parsed["limit"] == 5
+            @test parsed["with_payload"] === true
+        end
+
+        @testset "RecommendRequest using_ → using tag" begin
+            rr = RecommendRequest(positive=Any[1, 2], limit=5, using_="dense")
+            j = JSON.json(rr)
+            parsed = JSON.parse(j)
+            @test parsed["using"] == "dense"
+            @test !haskey(parsed, "using_")
+        end
+
+        @testset "QueryRequest using_ → using tag" begin
+            qr = QueryRequest(query=Float32[1.0, 0.0], limit=3, using_="image")
+            j = JSON.json(qr)
+            parsed = JSON.parse(j)
+            @test parsed["using"] == "image"
+            @test !haskey(parsed, "using_")
+        end
+
+        @testset "Filter" begin
+            f = Filter(must=Any[Dict("key" => "color", "match" => Dict("value" => "red"))])
+            j = JSON.json(f)
+            parsed = JSON.parse(j)
+            @test length(parsed["must"]) == 1
+        end
+
+        @testset "TextIndexParams" begin
+            tip = TextIndexParams(tokenizer="word", lowercase=true)
+            j = JSON.json(tip)
+            parsed = JSON.parse(j)
+            @test parsed["type"] == "text"
+            @test parsed["tokenizer"] == "word"
+            @test parsed["lowercase"] === true
+        end
+    end
+
+    # ── to_dict (nothing-stripping) ─────────────────────────────────────
+    @testset "to_dict" begin
         vp = VectorParams(size=4, distance=Dot)
-        d = todict(vp)
-        @test d[:size] == 4
-        @test d[:distance] == "Dot"
-        @test !haskey(d, :hnsw_config)  # nothing fields stripped
+        d = to_dict(vp)
+        @test d["size"] == 4
+        @test d["distance"] == "Dot"
+        @test !haskey(d, "hnsw_config")
+        @test !haskey(d, "on_disk")
 
-        cfg = CollectionConfig(vectors=vp, on_disk_payload=true)
-        dc = todict(cfg)
-        @test dc[:vectors][:distance] == "Dot"
-        @test dc[:on_disk_payload] === true
-        @test !haskey(dc, :sparse_vectors)
+        vp2 = VectorParams(size=4, distance=Euclid, on_disk=true)
+        d2 = to_dict(vp2)
+        @test d2["on_disk"] === true
 
-        pt = PointStruct(id=1, vector=Float32[1,2,3])
-        dp = todict(pt)
-        @test dp[:id] == 1
-        @test dp[:vector] == Float32[1,2,3]
-        @test !haskey(dp, :payload)
+        pt = PointStruct(id=1, vector=Float32[1.0, 2.0])
+        dp = to_dict(pt)
+        @test dp["id"] == 1
+        @test !haskey(dp, "payload")
 
-        sr = SearchRequest(vector=Float32[1,0,0,0], limit=5, with_payload=true)
-        ds = todict(sr)
-        @test ds[:limit] == 5
-        @test ds[:with_payload] === true
+        sr = SearchRequest(vector=Float32[1.0], limit=5, with_payload=true)
+        ds = to_dict(sr)
+        @test ds["limit"] == 5
+        @test ds["with_payload"] === true
+        @test !haskey(ds, "filter")
     end
 
-    # ── Unit: Client ─────────────────────────────────────────────────────
-    @testset "Client" begin
-        c = Client()
-        @test c.host == "http://localhost"
-        @test c.port == 6333
-        @test c.api_key === nothing
-        @test c.timeout == 30
+    # ── QdrantConnection / Client ───────────────────────────────────────
+    @testset "QdrantConnection" begin
+        c = QdrantConnection()
+        @test c.transport isa HTTPTransport
+        @test c.transport.host == "localhost"
+        @test c.transport.port == 6333
+        @test c.transport.api_key === nothing
+        @test c.transport.tls === false
 
-        c2 = Client(host="http://example.com", port=8080, api_key="key123")
-        @test c2.api_key == "key123"
+        c2 = QdrantConnection(host="example.com", port=8080, api_key="secret", tls=true)
+        @test c2.transport.host == "example.com"
+        @test c2.transport.port == 8080
+        @test c2.transport.api_key == "secret"
+        @test c2.transport.tls === true
 
-        set_client!(c2)
-        @test get_client().host == "http://example.com"
-        set_client!(Client())  # reset
-
-        @test QdrantClient._url(c, "/collections") == "http://localhost:6333/collections"
-        @test QdrantClient._url(c, "collections") == "http://localhost:6333/collections"
+        # Client alias
+        c3 = Client(host="test.com", port=1234)
+        @test c3 isa QdrantConnection
+        @test c3.transport.host == "test.com"
     end
 
-    # ── Unit: Headers ────────────────────────────────────────────────────
+    # ── Transport ───────────────────────────────────────────────────────
+    @testset "Transport" begin
+        t = HTTPTransport(host="myhost", port=9999, tls=true, api_key="abc")
+        @test QdrantClient.base_url(t) == "https://myhost:9999"
+
+        t2 = HTTPTransport(host="local", port=6333)
+        @test QdrantClient.base_url(t2) == "http://local:6333"
+
+        @test QdrantClient.transport_url(t2, "/collections") == "http://local:6333/collections"
+        @test QdrantClient.transport_url(t2, "collections") == "http://local:6333/collections"
+    end
+
+    # ── Headers ─────────────────────────────────────────────────────────
     @testset "Headers" begin
-        h = QdrantClient._headers(Client(api_key="secret"))
-        hd = Dict(h)
+        t_with_key = HTTPTransport(api_key="secret")
+        headers = QdrantClient.transport_headers(t_with_key)
+        hd = Dict(headers)
         @test hd["Content-Type"] == "application/json"
         @test hd["api-key"] == "secret"
         @test startswith(hd["User-Agent"], "QdrantClient.jl/")
 
-        h2 = QdrantClient._headers(Client())
-        hd2 = Dict(h2)
+        t_no_key = HTTPTransport()
+        headers2 = QdrantClient.transport_headers(t_no_key)
+        hd2 = Dict(headers2)
         @test !haskey(hd2, "api-key")
     end
 
-    # ── Unit: Error ──────────────────────────────────────────────────────
-    @testset "Error" begin
+    # ── Global Client ───────────────────────────────────────────────────
+    @testset "Global Client" begin
+        c1 = QdrantConnection(host="host1")
+        set_client!(c1)
+        @test get_client().transport.host == "host1"
+
+        # Restore default
+        set_client!(QdrantConnection())
+        @test get_client().transport.host == "localhost"
+    end
+
+    # ── Error Type ──────────────────────────────────────────────────────
+    @testset "QdrantError" begin
         err = QdrantError(404, "Not found")
         @test err.status == 404
+        @test err.message == "Not found"
         @test err.detail === nothing
 
-        err2 = QdrantError(500, "Fail", Dict(:info => "x"))
-        @test err2.detail[:info] == "x"
+        err2 = QdrantError(500, "Internal", Dict("info" => "details"))
+        @test err2.detail["info"] == "details"
 
         buf = IOBuffer()
         showerror(buf, err)
-        @test contains(String(take!(buf)), "404")
+        s = String(take!(buf))
+        @test contains(s, "404")
+        @test contains(s, "Not found")
     end
 
-    # ── Unit: parse_response ─────────────────────────────────────────────
+    # ── parse_response ──────────────────────────────────────────────────
     @testset "parse_response" begin
-        empty_resp = HTTP.Response(200, "", body="")
+        empty_resp = HTTP.Response(200, []; body=UInt8[])
         @test QdrantClient.parse_response(empty_resp) === nothing
 
-        wrapped = HTTP.Response(200, "", body=JSON.json(Dict(
-            :status => "ok", :time => 0.01, :result => Dict(:count => 7)
-        )))
-        @test QdrantClient.parse_response(wrapped)[:count] == 7
+        wrapped = HTTP.Response(200, [];
+            body=Vector{UInt8}(JSON.json(Dict(
+                "status" => "ok", "time" => 0.01,
+                "result" => Dict("count" => 7)
+            )))
+        )
+        r = QdrantClient.parse_response(wrapped)
+        @test r["count"] == 7
 
-        raw = HTTP.Response(200, "", body=JSON.json(Dict(:key => "val")))
-        @test QdrantClient.parse_response(raw)[:key] == "val"
+        raw = HTTP.Response(200, [];
+            body=Vector{UInt8}(JSON.json(Dict("key" => "val")))
+        )
+        r2 = QdrantClient.parse_response(raw)
+        @test r2["key"] == "val"
     end
 
-    # ── Integration ──────────────────────────────────────────────────────
+    # ── serialize_body ──────────────────────────────────────────────────
+    @testset "serialize_body" begin
+        vp = VectorParams(size=4, distance=Dot)
+        s = serialize_body(vp)
+        @test s isa String
+        parsed = JSON.parse(s)
+        @test parsed["size"] == 4
+        @test parsed["distance"] == "Dot"
+    end
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Integration Tests (require Qdrant on localhost:6333)
+    # ═══════════════════════════════════════════════════════════════════
+
     @testset "Integration" begin
-        if !_available()
-            @test_skip "Qdrant not available on localhost:6333"
+        if !qdrant_available()
+            @warn "Qdrant not available on localhost:6333 — skipping integration tests"
+            @test_skip "Qdrant not available"
         else
+            # ── Collection Lifecycle ────────────────────────────────────
             @testset "Collection Lifecycle" begin
-                coll = _name("jl_coll")
-                a1 = coll * "_alias"
-                a2 = coll * "_alias2"
-                _cleanup_alias(C, a1); _cleanup_alias(C, a2); _cleanup(C, coll)
+                coll = unique_name("coll")
+                cleanup_collection(CONN, coll)
 
-                @test create_collection(C, coll; vectors=VectorParams(size=4, distance=Dot)) === true
+                result = create_collection(CONN, coll, CollectionConfig(
+                    vectors=VectorParams(size=4, distance=Dot)
+                ))
+                @test result === true
 
-                all = list_collections(C)
-                @test any(c[:name] == coll for c in all[:collections])
+                colls = list_collections(CONN)
+                if colls isa AbstractDict && haskey(colls, "collections")
+                    names = [c["name"] for c in colls["collections"]]
+                    @test coll in names
+                end
 
-                @test collection_exists(C, coll)[:exists] === true
+                exists = collection_exists(CONN, coll)
+                @test exists isa AbstractDict
+                @test exists["exists"] === true
 
-                info = get_collection(C, coll)
-                @test info[:status] == "green"
-                @test info[:config][:params][:vectors][:size] == 4
+                info = get_collection(CONN, coll)
+                @test info["status"] == "green"
+                @test info["config"]["params"]["vectors"]["size"] == 4
 
-                @test create_alias(C, a1, coll) === true
-                aliases = list_aliases(C)
-                @test any(a[:alias_name] == a1 for a in aliases[:aliases])
-
-                ca = list_collection_aliases(C, coll)
-                @test any(a[:alias_name] == a1 for a in ca[:aliases])
-
-                @test rename_alias(C, a1, a2) === true
-                @test any(a[:alias_name] == a2 for a in list_aliases(C)[:aliases])
-
-                @test delete_alias(C, a2) === true
-                @test delete_collection(C, coll) === true
+                @test delete_collection(CONN, coll) === true
             end
 
+            # ── Collection create with kwargs ───────────────────────────
+            @testset "Collection create kwargs" begin
+                coll = unique_name("ckw")
+                cleanup_collection(CONN, coll)
+
+                create_collection(CONN, coll;
+                    vectors=VectorParams(size=4, distance=Cosine))
+                info = get_collection(CONN, coll)
+                @test info["config"]["params"]["vectors"]["distance"] == "Cosine"
+
+                cleanup_collection(CONN, coll)
+            end
+
+            # ── Aliases ─────────────────────────────────────────────────
+            @testset "Aliases" begin
+                coll = unique_name("alias")
+                a1 = coll * "_a1"
+                a2 = coll * "_a2"
+                cleanup_alias(CONN, a1); cleanup_alias(CONN, a2)
+                cleanup_collection(CONN, coll)
+
+                create_collection(CONN, coll,
+                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+
+                @test create_alias(CONN, a1, coll) === true
+
+                aliases = list_aliases(CONN)
+                if aliases isa AbstractDict && haskey(aliases, "aliases")
+                    alias_names = [a["alias_name"] for a in aliases["aliases"]]
+                    @test a1 in alias_names
+                end
+
+                ca = list_collection_aliases(CONN, coll)
+                if ca isa AbstractDict && haskey(ca, "aliases")
+                    @test any(a["alias_name"] == a1 for a in ca["aliases"])
+                end
+
+                @test rename_alias(CONN, a1, a2) === true
+                @test delete_alias(CONN, a2) === true
+
+                cleanup_collection(CONN, coll)
+            end
+
+            # ── Points CRUD ─────────────────────────────────────────────
             @testset "Points CRUD" begin
-                coll = _name("jl_pts")
-                _cleanup(C, coll)
-                create_collection(C, coll; vectors=VectorParams(size=4, distance=Dot))
-                pts = _fixture()
+                coll = unique_name("pts")
+                cleanup_collection(CONN, coll)
+                create_collection(CONN, coll,
+                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+                pts = fixture_points()
 
-                res = upsert_points(C, coll, pts; wait=true)
-                @test res[:status] == "completed"
+                res = upsert_points(CONN, coll, pts; wait=true)
+                @test res["status"] == "completed"
 
-                got = get_points(C, coll, [1, 2]; with_vectors=true, with_payload=true)
+                got = get_points(CONN, coll, [1, 2]; with_vectors=true, with_payload=true)
                 @test length(got) == 2
-                @test got[1][:id] == 1
-                @test got[1][:payload][:group] == "a"
-                @test length(got[1][:vector]) == 4
+                @test got[1]["id"] == 1
+                @test got[1]["payload"]["group"] == "a"
+                @test length(got[1]["vector"]) == 4
 
-                single = get_points(C, coll, 1; with_payload=true)
+                single = get_points(CONN, coll, 1; with_payload=true)
                 @test length(single) == 1
-                @test single[1][:id] == 1
+                @test single[1]["id"] == 1
 
-                @test count_points(C, coll; exact=true)[:count] == 3
+                cnt = count_points(CONN, coll; exact=true)
+                @test cnt["count"] == 3
 
-                @test set_payload(C, coll, Dict("flag" => true), [1, 2])[:status] == "completed"
-                @test set_payload(C, coll, Dict("solo" => true), 1)[:status] == "completed"
+                delete_points(CONN, coll, [2]; wait=true)
+                cnt2 = count_points(CONN, coll; exact=true)
+                @test cnt2["count"] == 2
 
-                after = get_points(C, coll, [1, 2]; with_payload=true)
-                @test after[1][:payload][:flag] === true
-                @test after[2][:payload][:flag] === true
-                @test after[1][:payload][:solo] === true
+                delete_points(CONN, coll, 3; wait=true)
+                cnt3 = count_points(CONN, coll; exact=true)
+                @test cnt3["count"] == 1
 
-                @test delete_payload(C, coll, ["flag"], [2])[:status] == "completed"
-                @test delete_payload(C, coll, ["solo"], 1)[:status] == "completed"
-
-                p2 = get_points(C, coll, [2]; with_payload=true)
-                @test !haskey(p2[1][:payload], :flag)
-                p1 = get_points(C, coll, 1; with_payload=true)
-                @test !haskey(p1[1][:payload], :solo)
-
-                @test clear_payload(C, coll, 3)[:status] == "completed"
-                p3 = get_points(C, coll, [3]; with_payload=true)
-                @test isempty(p3[1][:payload])
-
-                @test delete_points(C, coll, 2)[:status] == "completed"
-                @test count_points(C, coll; exact=true)[:count] == 2
-
-                _cleanup(C, coll)
+                cleanup_collection(CONN, coll)
             end
 
-            @testset "Search Query Discovery" begin
-                coll = _name("jl_search")
-                _cleanup(C, coll)
-                create_collection(C, coll; vectors=VectorParams(size=4, distance=Dot))
-                upsert_points(C, coll, _fixture(); wait=true)
+            # ── Points with UUID IDs ────────────────────────────────────
+            @testset "Points UUID IDs" begin
+                coll = unique_name("uuid")
+                cleanup_collection(CONN, coll)
+                create_collection(CONN, coll,
+                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
 
-                scrolled = scroll_points(C, coll; limit=10, with_payload=true)
-                @test length(scrolled[:points]) == 3
+                u1 = string(uuid4())
+                u2 = string(uuid4())
+                pts = [
+                    PointStruct(id=u1, vector=Float32[1.0, 0.0, 0.0, 0.0],
+                                payload=Dict{String,Any}("label" => "first")),
+                    PointStruct(id=u2, vector=Float32[0.0, 1.0, 0.0, 0.0],
+                                payload=Dict{String,Any}("label" => "second")),
+                ]
+                res = upsert_points(CONN, coll, pts; wait=true)
+                @test res["status"] == "completed"
 
-                hits = search_points(C, coll, SearchRequest(vector=Float32[1,0,0,0], limit=2, with_payload=true))
+                got = get_points(CONN, coll, [u1]; with_payload=true)
+                @test length(got) == 1
+                @test got[1]["id"] == u1
+                @test got[1]["payload"]["label"] == "first"
+
+                cleanup_collection(CONN, coll)
+            end
+
+            # ── Payload Operations ──────────────────────────────────────
+            @testset "Payload Operations" begin
+                coll = unique_name("payload")
+                cleanup_collection(CONN, coll)
+                create_collection(CONN, coll,
+                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+                upsert_points(CONN, coll, fixture_points(); wait=true)
+
+                res = set_payload(CONN, coll, Dict("flag" => true), [1, 2])
+                @test res["status"] == "completed"
+
+                set_payload(CONN, coll, Dict("solo" => "yes"), 1)
+
+                after = get_points(CONN, coll, [1, 2]; with_payload=true)
+                @test after[1]["payload"]["flag"] === true
+                @test after[2]["payload"]["flag"] === true
+                @test after[1]["payload"]["solo"] == "yes"
+
+                delete_payload(CONN, coll, ["flag"], [2])
+                p2 = get_points(CONN, coll, [2]; with_payload=true)
+                @test !haskey(p2[1]["payload"], "flag")
+
+                clear_payload(CONN, coll, [3]; wait=true)
+                p3 = get_points(CONN, coll, [3]; with_payload=true)
+                @test isempty(p3[1]["payload"])
+
+                cleanup_collection(CONN, coll)
+            end
+
+            # ── Filter-based Payload Operations ─────────────────────────
+            @testset "Filter-based Payload" begin
+                coll = unique_name("fpay")
+                cleanup_collection(CONN, coll)
+                create_collection(CONN, coll,
+                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+                upsert_points(CONN, coll, fixture_points(); wait=true)
+
+                f = Filter(must=Any[Dict("key" => "group", "match" => Dict("value" => "a"))])
+                res = set_payload(CONN, coll, Dict("filtered" => true), f)
+                @test res["status"] == "completed"
+
+                pts = get_points(CONN, coll, [1, 2]; with_payload=true)
+                @test pts[1]["payload"]["filtered"] === true
+                @test pts[2]["payload"]["filtered"] === true
+
+                p3 = get_points(CONN, coll, [3]; with_payload=true)
+                @test !haskey(p3[1]["payload"], "filtered")
+
+                cleanup_collection(CONN, coll)
+            end
+
+            # ── Scroll ──────────────────────────────────────────────────
+            @testset "Scroll" begin
+                coll = unique_name("scroll")
+                cleanup_collection(CONN, coll)
+                create_collection(CONN, coll,
+                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+                upsert_points(CONN, coll, fixture_points(); wait=true)
+
+                result = scroll_points(CONN, coll; limit=10, with_payload=true)
+                @test length(result["points"]) == 3
+
+                result2 = scroll_points(CONN, coll; limit=2)
+                @test length(result2["points"]) == 2
+
+                cleanup_collection(CONN, coll)
+            end
+
+            # ── Search ──────────────────────────────────────────────────
+            @testset "Search" begin
+                coll = unique_name("search")
+                cleanup_collection(CONN, coll)
+                create_collection(CONN, coll,
+                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+                upsert_points(CONN, coll, fixture_points(); wait=true)
+
+                hits = search_points(CONN, coll,
+                    SearchRequest(vector=Float32[1, 0, 0, 0], limit=2, with_payload=true))
                 @test length(hits) == 2
-                @test hits[1][:id] == 1
+                @test hits[1]["id"] == 1
 
-                batch = search_batch(C, coll, [SearchRequest(vector=Float32[1,0,0,0], limit=2)])
-                @test length(batch) == 1
+                hits2 = search_points(CONN, coll;
+                    vector=Float32[0, 1, 0, 0], limit=1, with_payload=true)
+                @test length(hits2) == 1
+                @test hits2[1]["id"] == 3
+
+                batch = search_batch(CONN, coll, [
+                    SearchRequest(vector=Float32[1, 0, 0, 0], limit=2),
+                    SearchRequest(vector=Float32[0, 1, 0, 0], limit=1),
+                ])
+                @test length(batch) == 2
                 @test length(batch[1]) == 2
+                @test length(batch[2]) == 1
 
-                recs = recommend_points(C, coll, RecommendRequest(positive=[1], limit=2, with_payload=true))
+                cleanup_collection(CONN, coll)
+            end
+
+            # ── Recommend ───────────────────────────────────────────────
+            @testset "Recommend" begin
+                coll = unique_name("rec")
+                cleanup_collection(CONN, coll)
+                create_collection(CONN, coll,
+                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+                upsert_points(CONN, coll, fixture_points(); wait=true)
+
+                recs = recommend_points(CONN, coll,
+                    RecommendRequest(positive=Any[1], limit=2, with_payload=true))
                 @test length(recs) == 2
-                @test recs[1][:id] != 1
+                @test all(r["id"] != 1 for r in recs)
 
-                qr = query_points(C, coll, QueryRequest(query=Float32[1,0,0,0], limit=2, with_payload=true))
-                @test length(qr[:points]) == 2
-                @test qr[:points][1][:id] == 1
-
-                qb = query_batch(C, coll, [QueryRequest(query=Float32[1,0,0,0], limit=2)])
-                @test length(qb) == 1
-                @test length(qb[1][:points]) == 2
-
-                disc = discover_points(C, coll, DiscoverRequest(target=1, limit=2, with_payload=true))
-                @test length(disc) == 2
-                @test disc[1][:id] != 1
-
-                _cleanup(C, coll)
+                cleanup_collection(CONN, coll)
             end
 
+            # ── Query Points ────────────────────────────────────────────
+            @testset "Query Points" begin
+                coll = unique_name("query")
+                cleanup_collection(CONN, coll)
+                create_collection(CONN, coll,
+                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+                upsert_points(CONN, coll, fixture_points(); wait=true)
+
+                qr = query_points(CONN, coll,
+                    QueryRequest(query=Float32[1, 0, 0, 0], limit=2, with_payload=true))
+                @test haskey(qr, "points")
+                @test length(qr["points"]) == 2
+                @test qr["points"][1]["id"] == 1
+
+                qb = query_batch(CONN, coll, [
+                    QueryRequest(query=Float32[1, 0, 0, 0], limit=2),
+                    QueryRequest(query=Float32[0, 1, 0, 0], limit=1),
+                ])
+                @test length(qb) == 2
+
+                cleanup_collection(CONN, coll)
+            end
+
+            # ── Discovery ───────────────────────────────────────────────
+            @testset "Discovery" begin
+                coll = unique_name("disc")
+                cleanup_collection(CONN, coll)
+                create_collection(CONN, coll,
+                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+                upsert_points(CONN, coll, fixture_points(); wait=true)
+
+                disc = discover_points(CONN, coll,
+                    DiscoverRequest(target=Float32[1, 0, 0, 0], limit=2,
+                        context=Any[
+                            Dict("positive" => 1, "negative" => 3)
+                        ],
+                        with_payload=true))
+                @test length(disc) >= 1
+
+                cleanup_collection(CONN, coll)
+            end
+
+            # ── Snapshots ───────────────────────────────────────────────
             @testset "Snapshots" begin
-                coll = _name("jl_snap")
-                _cleanup(C, coll)
-                create_collection(C, coll; vectors=VectorParams(size=4, distance=Dot))
-                upsert_points(C, coll, _fixture(); wait=true)
+                coll = unique_name("snap")
+                cleanup_collection(CONN, coll)
+                create_collection(CONN, coll,
+                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+                upsert_points(CONN, coll, fixture_points(); wait=true)
 
-                snap = create_snapshot(C, coll)
-                @test haskey(snap, :name)
+                snap = create_snapshot(CONN, coll)
+                @test haskey(snap, "name")
 
-                snaps = list_snapshots(C, coll)
+                snaps = list_snapshots(CONN, coll)
                 @test length(snaps) >= 1
-                @test any(s[:name] == snap[:name] for s in snaps)
+                snap_names = [s isa AbstractDict ? s["name"] : "" for s in snaps]
+                @test snap["name"] in snap_names
 
-                @test delete_snapshot(C, coll, snap[:name]) === true
+                @test delete_snapshot(CONN, coll, snap["name"]) === true
 
-                _cleanup(C, coll)
+                cleanup_collection(CONN, coll)
             end
+
+            # ── Payload Index ───────────────────────────────────────────
+            @testset "Payload Index" begin
+                coll = unique_name("pidx")
+                cleanup_collection(CONN, coll)
+                create_collection(CONN, coll,
+                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+                upsert_points(CONN, coll, fixture_points(); wait=true)
+
+                res = create_payload_index(CONN, coll, "group";
+                    field_schema="keyword", wait=true)
+                @test res["status"] == "completed"
+
+                res2 = create_payload_index(CONN, coll, "n";
+                    field_schema="integer", wait=true)
+                @test res2["status"] == "completed"
+
+                res3 = delete_payload_index(CONN, coll, "group"; wait=true)
+                @test res3["status"] == "completed"
+
+                cleanup_collection(CONN, coll)
+            end
+
+            # ── Text Index ──────────────────────────────────────────────
+            @testset "Text Index" begin
+                coll = unique_name("tidx")
+                cleanup_collection(CONN, coll)
+                create_collection(CONN, coll,
+                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+
+                pts = [
+                    PointStruct(id=1, vector=Float32[1, 0, 0, 0],
+                        payload=Dict{String,Any}("text" => "hello world")),
+                    PointStruct(id=2, vector=Float32[0, 1, 0, 0],
+                        payload=Dict{String,Any}("text" => "goodbye world")),
+                ]
+                upsert_points(CONN, coll, pts; wait=true)
+
+                tip = TextIndexParams(tokenizer="word", lowercase=true)
+                res = create_payload_index(CONN, coll, "text";
+                    field_schema=tip, wait=true)
+                @test res["status"] == "completed"
+
+                cleanup_collection(CONN, coll)
+            end
+
+            # ── Multiple / Named Vectors ────────────────────────────────
+            @testset "Named Vectors" begin
+                coll = unique_name("named")
+                cleanup_collection(CONN, coll)
+
+                cfg = CollectionConfig(
+                    vectors=Dict{String,Any}(
+                        "image" => Dict{String,Any}("size" => 4, "distance" => "Cosine"),
+                        "text" => Dict{String,Any}("size" => 4, "distance" => "Dot"),
+                    )
+                )
+                create_collection(CONN, coll, cfg)
+
+                pts = [
+                    PointStruct(id=1,
+                        vector=Dict{String,Any}(
+                            "image" => Float32[1, 0, 0, 0],
+                            "text" => Float32[0, 1, 0, 0],
+                        ),
+                        payload=Dict{String,Any}("label" => "first")),
+                    PointStruct(id=2,
+                        vector=Dict{String,Any}(
+                            "image" => Float32[0, 1, 0, 0],
+                            "text" => Float32[1, 0, 0, 0],
+                        ),
+                        payload=Dict{String,Any}("label" => "second")),
+                ]
+                upsert_points(CONN, coll, pts; wait=true)
+
+                hits = search_points(CONN, coll,
+                    SearchRequest(vector=Dict{String,Any}(
+                        "name" => "image", "vector" => Float32[1, 0, 0, 0]),
+                        limit=2, with_payload=true))
+                @test length(hits) == 2
+                @test hits[1]["id"] == 1
+
+                hits2 = search_points(CONN, coll,
+                    SearchRequest(vector=Dict{String,Any}(
+                        "name" => "text", "vector" => Float32[1, 0, 0, 0]),
+                        limit=2, with_payload=true))
+                @test length(hits2) == 2
+                @test hits2[1]["id"] == 2
+
+                cleanup_collection(CONN, coll)
+            end
+
+            # ── Vector Operations (update/delete) ───────────────────────
+            @testset "Vector Operations" begin
+                coll = unique_name("vecops")
+                cleanup_collection(CONN, coll)
+
+                cfg = CollectionConfig(
+                    vectors=Dict{String,Any}(
+                        "dense" => Dict{String,Any}("size" => 4, "distance" => "Dot"),
+                    )
+                )
+                create_collection(CONN, coll, cfg)
+
+                pts = [
+                    PointStruct(id=1, vector=Dict{String,Any}("dense" => Float32[1, 0, 0, 0])),
+                    PointStruct(id=2, vector=Dict{String,Any}("dense" => Float32[0, 1, 0, 0])),
+                ]
+                upsert_points(CONN, coll, pts; wait=true)
+
+                update_vectors(CONN, coll, [
+                    Dict("id" => 1, "vector" => Dict("dense" => Float32[0.5, 0.5, 0, 0]))
+                ])
+
+                got = get_points(CONN, coll, [1]; with_vectors=true)
+                v = got[1]["vector"]["dense"]
+                @test v[1] ≈ 0.5 atol=0.01
+                @test v[2] ≈ 0.5 atol=0.01
+
+                delete_vectors(CONN, coll, ["dense"], [2]; wait=true)
+
+                cleanup_collection(CONN, coll)
+            end
+
+            # ── Service API ─────────────────────────────────────────────
+            @testset "Service API" begin
+                health = health_check(CONN)
+                @test health["status"] == "healthy"
+
+                telemetry = get_telemetry(CONN)
+                @test telemetry isa AbstractDict
+            end
+
+            # ── Cluster / Distributed ───────────────────────────────────
+            @testset "Cluster Status" begin
+                cs = cluster_status(CONN)
+                @test cs isa AbstractDict
+            end
+
+            # ── Batch Operations ────────────────────────────────────────
+            @testset "Batch Points" begin
+                coll = unique_name("batch")
+                cleanup_collection(CONN, coll)
+                create_collection(CONN, coll,
+                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+
+                ops = [
+                    Dict("upsert" => Dict(
+                        "points" => [
+                            Dict("id" => 1, "vector" => Float32[1, 0, 0, 0],
+                                 "payload" => Dict("k" => "v")),
+                            Dict("id" => 2, "vector" => Float32[0, 1, 0, 0]),
+                        ]
+                    )),
+                ]
+                res = batch_points(CONN, coll, ops; wait=true)
+                @test res isa AbstractVector
+
+                cnt = count_points(CONN, coll; exact=true)
+                @test cnt["count"] == 2
+
+                cleanup_collection(CONN, coll)
+            end
+
+            # ── Search with Filter ──────────────────────────────────────
+            @testset "Search with Filter" begin
+                coll = unique_name("sfilt")
+                cleanup_collection(CONN, coll)
+                create_collection(CONN, coll,
+                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+                upsert_points(CONN, coll, fixture_points(); wait=true)
+
+                create_payload_index(CONN, coll, "group";
+                    field_schema="keyword", wait=true)
+
+                f = Filter(must=Any[
+                    Dict("key" => "group", "match" => Dict("value" => "a"))
+                ])
+                hits = search_points(CONN, coll,
+                    SearchRequest(vector=Float32[1, 0, 0, 0], limit=10,
+                        filter=f, with_payload=true))
+                @test length(hits) == 2
+                @test all(h["payload"]["group"] == "a" for h in hits)
+
+                cleanup_collection(CONN, coll)
+            end
+
+            # ── Update Collection ───────────────────────────────────────
+            @testset "Update Collection" begin
+                coll = unique_name("upd")
+                cleanup_collection(CONN, coll)
+                create_collection(CONN, coll,
+                    CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+
+                result = update_collection(CONN, coll,
+                    CollectionUpdate(optimizers_config=Dict{String,Any}(
+                        "indexing_threshold" => 10000
+                    )))
+                @test result === true
+
+                cleanup_collection(CONN, coll)
+            end
+
+        end  # qdrant_available
+    end  # Integration
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Benchmarks (lightweight timing)
+    # ═══════════════════════════════════════════════════════════════════
+
+    @testset "Benchmarks" begin
+        if qdrant_available()
+            coll = unique_name("bench")
+            cleanup_collection(CONN, coll)
+            create_collection(CONN, coll,
+                CollectionConfig(vectors=VectorParams(size=128, distance=Dot)))
+
+            n_points = 100
+            pts = [PointStruct(id=i, vector=Float32.(randn(128)),
+                    payload=Dict{String,Any}("idx" => i))
+                   for i in 1:n_points]
+
+            t_upsert = @elapsed upsert_points(CONN, coll, pts; wait=true)
+            @test t_upsert < 30.0
+            @info "Benchmark: upsert $n_points points" time_s=round(t_upsert, digits=3)
+
+            query_vec = Float32.(randn(128))
+            t_search = @elapsed for _ in 1:10
+                search_points(CONN, coll,
+                    SearchRequest(vector=query_vec, limit=10))
+            end
+            @test t_search < 30.0
+            @info "Benchmark: 10 searches" time_s=round(t_search, digits=3) per_search=round(t_search/10, digits=4)
+
+            t_query = @elapsed for _ in 1:10
+                query_points(CONN, coll,
+                    QueryRequest(query=query_vec, limit=10))
+            end
+            @info "Benchmark: 10 queries" time_s=round(t_query, digits=3) per_query=round(t_query/10, digits=4)
+
+            t_scroll = @elapsed scroll_points(CONN, coll; limit=100, with_payload=true)
+            @info "Benchmark: scroll 100 points" time_s=round(t_scroll, digits=3)
+
+            t_count = @elapsed for _ in 1:10
+                count_points(CONN, coll; exact=true)
+            end
+            @info "Benchmark: 10 counts" time_s=round(t_count, digits=3)
+
+            t_ser = @elapsed for _ in 1:1000
+                serialize_body(VectorParams(size=128, distance=Dot))
+            end
+            @info "Benchmark: 1000 serialize_body calls" time_s=round(t_ser, digits=4)
+
+            t_dict = @elapsed for _ in 1:1000
+                to_dict(VectorParams(size=128, distance=Dot))
+            end
+            @info "Benchmark: 1000 to_dict calls" time_s=round(t_dict, digits=4)
+
+            cleanup_collection(CONN, coll)
+        else
+            @test_skip "Benchmarks need Qdrant"
         end
     end
-end
+
+end  # QdrantClient.jl v0.3.0

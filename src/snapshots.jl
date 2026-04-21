@@ -7,29 +7,29 @@
 
 Create a snapshot of a collection.
 """
-function create_snapshot(c::Client, coll::AbstractString)
-    _rp(HTTP.post, c, "/collections/$coll/snapshots")
+function create_snapshot(c::QdrantConnection, collection::AbstractString)
+    execute(HTTP.post, c, "/collections/$collection/snapshots")
 end
-create_snapshot(coll::AbstractString) = create_snapshot(get_client(), coll)
+create_snapshot(collection::AbstractString) = create_snapshot(get_client(), collection)
 
 """
     list_snapshots(client, collection)
 
 List all snapshots for a collection.
 """
-function list_snapshots(c::Client, coll::AbstractString)
-    result = _rp(HTTP.get, c, "/collections/$coll/snapshots")
-    result isa AbstractVector ? result : get(result, :snapshots, Any[])
+function list_snapshots(c::QdrantConnection, collection::AbstractString)
+    result = execute(HTTP.get, c, "/collections/$collection/snapshots")
+    result isa AbstractVector ? result : get(result, "snapshots", Any[])
 end
-list_snapshots(coll::AbstractString) = list_snapshots(get_client(), coll)
+list_snapshots(collection::AbstractString) = list_snapshots(get_client(), collection)
 
 """
     delete_snapshot(client, collection, snapshot_name)
 
 Delete a snapshot.
 """
-function delete_snapshot(c::Client, coll::AbstractString, name::AbstractString)
-    _rp(HTTP.delete, c, "/collections/$coll/snapshots/$name")
+function delete_snapshot(c::QdrantConnection, collection::AbstractString, name::AbstractString)
+    execute(HTTP.delete, c, "/collections/$collection/snapshots/$name")
 end
-delete_snapshot(coll::AbstractString, name::AbstractString) =
-    delete_snapshot(get_client(), coll, name)
+delete_snapshot(collection::AbstractString, name::AbstractString) =
+    delete_snapshot(get_client(), collection, name)

@@ -14,7 +14,7 @@ struct QdrantError <: Exception
     detail::Any
 end
 
-QdrantError(status::Int, message::AbstractString) = QdrantError(status, message, nothing)
+QdrantError(status::Integer, message::AbstractString) = QdrantError(Int(status), String(message), nothing)
 
 function Base.showerror(io::IO, err::QdrantError)
     print(io, "QdrantError")

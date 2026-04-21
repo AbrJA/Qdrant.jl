@@ -3,25 +3,26 @@
 
 A Julian client for the [Qdrant](https://qdrant.tech) vector database.
 
-Uses abstract types and multiple dispatch for extensibility.
-All API functions accept an explicit `Client` or fall back to `get_client()`.
+Leverages `StructUtils.jl` for zero-cost struct ↔ JSON mapping and an abstract
+transport layer for future gRPC support.
 
 # Quick Start
 ```julia
 using QdrantClient
 
-client = Client()
+client = QdrantConnection()
 create_collection(client, "demo", CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
 upsert_points(client, "demo", [PointStruct(id=1, vector=Float32[1,0,0,0])])
-search_points(client, "demo", SearchRequest(vector=Float32[1,0,0,0], limit=5))
+query_points(client, "demo", QueryRequest(query=Float32[1,0,0,0], limit=5))
 ```
 """
 module QdrantClient
 
 using HTTP
 using JSON
+using StructUtils
 
-const VERSION = "0.2.0"
+const CLIENT_VERSION = "0.3.0"
 
 # ── Error type ───────────────────────────────────────────────────────────
 include("error.jl")
@@ -30,111 +31,166 @@ include("error.jl")
 include("types.jl")
 
 # ============================================================================
-# Client
+# Transport Abstraction
 # ============================================================================
 
 """
-    Client
+    AbstractTransport
 
-Connection to a Qdrant server.
-
-# Fields
-- `host::String`: Server URL (default `"http://localhost"`)
-- `port::Int`: Server port (default `6333`)
-- `api_key::Union{String,Nothing}`: Optional API key
-- `timeout::Int`: Request timeout in seconds (default `30`)
+Abstract transport layer. Subtype this to add gRPC or other backends.
 """
-Base.@kwdef mutable struct Client
-    host::String = "http://localhost"
-    port::Int = 6333
-    api_key::Union{String,Nothing} = nothing
-    timeout::Int = 30
-    _pool::Union{HTTP.Pool,Nothing} = nothing
+abstract type AbstractTransport end
+
+"""
+    HTTPTransport <: AbstractTransport
+
+HTTP/REST transport using HTTP.jl with connection pooling.
+"""
+mutable struct HTTPTransport <: AbstractTransport
+    host::String
+    port::Int
+    api_key::Optional{String}
+    timeout::Int
+    tls::Bool
+    pool::Optional{HTTP.Pool}
 end
 
-const _GLOBAL_CLIENT = Ref{Client}()
+function HTTPTransport(;
+    host::String="localhost",
+    port::Int=6333,
+    api_key::Optional{String}=nothing,
+    timeout::Int=30,
+    tls::Bool=false,
+)
+    HTTPTransport(host, port, api_key, timeout, tls, nothing)
+end
+
+function ensure_pool!(transport::HTTPTransport)
+    transport.pool === nothing && (transport.pool = HTTP.Pool())
+    transport.pool
+end
+
+function base_url(transport::HTTPTransport)
+    scheme = transport.tls ? "https" : "http"
+    "$scheme://$(transport.host):$(transport.port)"
+end
+
+function transport_headers(transport::HTTPTransport)
+    headers = [
+        "Content-Type" => "application/json",
+        "User-Agent" => "QdrantClient.jl/$CLIENT_VERSION",
+    ]
+    transport.api_key !== nothing && push!(headers, "api-key" => transport.api_key)
+    headers
+end
+
+function transport_url(transport::HTTPTransport, path::AbstractString)
+    p = startswith(path, '/') ? path[2:end] : path
+    "$(base_url(transport))/$p"
+end
+
+# ============================================================================
+# QdrantConnection — the main client
+# ============================================================================
 
 """
-    set_client!(c::Client) -> Client
+    QdrantConnection
+
+Connection to a Qdrant server backed by an `AbstractTransport`.
+
+# Constructors
+```julia
+QdrantConnection()                          # localhost:6333
+QdrantConnection(host="myhost", port=6334)  # custom host/port
+QdrantConnection(transport)                 # custom transport
+```
+"""
+struct QdrantConnection
+    transport::AbstractTransport
+end
+
+function QdrantConnection(;
+    host::String="localhost",
+    port::Int=6333,
+    api_key::Optional{String}=nothing,
+    timeout::Int=30,
+    tls::Bool=false,
+)
+    QdrantConnection(HTTPTransport(; host, port, api_key, timeout, tls))
+end
+
+# Backward compat alias
+const Client = QdrantConnection
+
+const _GLOBAL_CLIENT = Ref{QdrantConnection}()
+
+"""
+    set_client!(c::QdrantConnection) -> QdrantConnection
 
 Set the global default client.
 """
-function set_client!(c::Client)
-    _GLOBAL_CLIENT[] = c
-    c
+function set_client!(conn::QdrantConnection)
+    _GLOBAL_CLIENT[] = conn
+    conn
 end
 
 """
-    get_client() -> Client
+    get_client() -> QdrantConnection
 
 Return the global default client, creating one if needed.
 """
 function get_client()
-    isassigned(_GLOBAL_CLIENT) || (_GLOBAL_CLIENT[] = Client())
+    isassigned(_GLOBAL_CLIENT) || (_GLOBAL_CLIENT[] = QdrantConnection())
     _GLOBAL_CLIENT[]
 end
 
 # ============================================================================
-# Serialization — todict protocol
+# Serialization — powered by StructUtils
 # ============================================================================
 
 """
-    todict(x::AbstractQdrantType) -> Dict{Symbol,Any}
+    serialize_body(x::AbstractQdrantType) -> String
 
-Recursively convert a Qdrant type to a `Dict`, dropping `nothing` fields.
-Dispatch on `AbstractQdrantType` makes this extensible for user subtypes.
+Serialize a Qdrant type to JSON, stripping `nothing` fields.
 """
-function todict(x::AbstractQdrantType)
-    d = Dict{Symbol,Any}()
-    for f in fieldnames(typeof(x))
-        v = getfield(x, f)
-        v === nothing && continue
-        d[f] = _serialize(v)
+serialize_body(x::AbstractQdrantType) = JSON.json(to_dict(x))
+
+"""
+    to_dict(x::AbstractQdrantType) -> Dict{String,Any}
+
+Convert a Qdrant type to a Dict, dropping `nothing` fields.
+Uses StructUtils.make for struct → Dict conversion.
+"""
+function to_dict(x::AbstractQdrantType)
+    d = Dict{String,Any}()
+    StructUtils.applyeach(StructUtils.DefaultStyle(), x) do key, val
+        val !== nothing && (d[string(key)] = _to_dict_value(val))
+        return
     end
     d
 end
 
-# Specialization: Distance enum serializes as its name string
-todict(d::Distance) = string(d)
-
-_serialize(v::AbstractQdrantType) = todict(v)
-_serialize(d::Distance) = string(d)
-_serialize(v::AbstractDict) = v
-_serialize(v::AbstractString) = v
-_serialize(v::Number) = v
-_serialize(v::Bool) = v
-_serialize(v::AbstractVector) = [_serialize(el) for el in v]
-_serialize(v::Tuple) = [_serialize(el) for el in v]
-_serialize(v) = v  # fallback
+_to_dict_value(x::AbstractQdrantType) = to_dict(x)
+_to_dict_value(x::AbstractVector) = [_to_dict_value(v) for v in x]
+_to_dict_value(x) = x
 
 # ============================================================================
-# HTTP internals
+# HTTP Request Infrastructure
 # ============================================================================
 
-_pool!(c::Client) = (c._pool === nothing && (c._pool = HTTP.Pool()); c._pool)
-
-function _url(c::Client, path::AbstractString)
-    p = startswith(path, '/') ? path[2:end] : path
-    "$(c.host):$(c.port)/$p"
-end
-
-function _headers(c::Client)
-    h = ["Content-Type" => "application/json", "User-Agent" => "QdrantClient.jl/$VERSION"]
-    c.api_key !== nothing && push!(h, "api-key" => c.api_key)
-    h
-end
-
-function _parse_error(resp::HTTP.Response)
+function parse_error(resp::HTTP.Response)
+    status = Int(resp.status)
     body = String(resp.body)
+    isempty(body) && return QdrantError(status, "API error $status")
     try
-        parsed = JSON.parse(body; dicttype=Dict{Symbol,Any})
-        st = get(parsed, :status, nothing)
-        if st isa Dict && haskey(st, :error)
-            return QdrantError(resp.status, st[:error], parsed)
+        parsed = JSON.parse(body)
+        st = get(parsed, "status", nothing)
+        if st isa AbstractDict && haskey(st, "error")
+            return QdrantError(status, string(st["error"]), parsed)
         end
-        return QdrantError(resp.status, "API error $(resp.status)", parsed)
+        return QdrantError(status, "API error $status", parsed)
     catch
-        return QdrantError(resp.status, "API error $(resp.status): $(first(body, 200))")
+        return QdrantError(status, "API error $status: $(first(body, 200))")
     end
 end
 
@@ -143,15 +199,26 @@ end
 
 Low-level HTTP request with error handling and connection pooling.
 """
-function request(method::Function, c::Client, path::AbstractString, body=nothing; query=nothing)
-    url = _url(c, path)
-    kw = Dict{Symbol,Any}(:pool => _pool!(c), :headers => _headers(c), :status_exception => false)
+function request(method::Function, conn::QdrantConnection, path::AbstractString, body=nothing; query=nothing)
+    transport = conn.transport::HTTPTransport
+    url = transport_url(transport, path)
+    kw = Dict{Symbol,Any}(
+        :pool => ensure_pool!(transport),
+        :headers => transport_headers(transport),
+        :status_exception => false,
+    )
     query !== nothing && (kw[:query] = query)
     if body !== nothing
-        kw[:body] = body isa AbstractString ? body : JSON.json(body)
+        kw[:body] = if body isa AbstractString
+            body
+        elseif body isa AbstractQdrantType
+            serialize_body(body)
+        else
+            JSON.json(body)
+        end
     end
     resp = method(url; kw...)
-    resp.status >= 400 && throw(_parse_error(resp))
+    resp.status >= 400 && throw(parse_error(resp))
     resp
 end
 
@@ -159,18 +226,21 @@ end
     parse_response(resp::HTTP.Response)
 
 Parse the JSON response, unwrapping Qdrant's `{status, time, result}` envelope.
-Returns `nothing` for empty bodies.
 """
 function parse_response(resp::HTTP.Response)
     b = String(resp.body)
     isempty(b) && return nothing
-    parsed = JSON.parse(b; dicttype=Dict{Symbol,Any})
-    haskey(parsed, :result) ? parsed[:result] : parsed
+    parsed = JSON.parse(b)
+    haskey(parsed, "result") ? parsed["result"] : parsed
 end
 
-# Convenience: request + parse in one step
-function _rp(method::Function, c::Client, path::AbstractString, body=nothing; query=nothing)
-    parse_response(request(method, c, path, body; query))
+"""
+    execute(method, client, path, [body]; query=nothing)
+
+Combined request + parse_response in one call.
+"""
+function execute(method::Function, conn::QdrantConnection, path::AbstractString, body=nothing; query=nothing)
+    parse_response(request(method, conn, path, body; query))
 end
 
 # ── API modules ──────────────────────────────────────────────────────────
@@ -187,10 +257,16 @@ include("service.jl")
 # ============================================================================
 
 # Core
-export Client, set_client!, get_client, QdrantError
+export QdrantConnection, Client, set_client!, get_client, QdrantError
+
+# Transport
+export AbstractTransport, HTTPTransport
 
 # Type hierarchy
 export AbstractQdrantType, AbstractConfig, AbstractRequest, AbstractCondition
+
+# Type alias
+export Optional
 
 # Enum & aliases
 export Distance, Cosine, Euclid, Dot, Manhattan, PointId
@@ -202,14 +278,17 @@ export CollectionConfig, CollectionUpdate, VectorParams, SparseVectorParams
 export PointStruct
 
 # Conditions
-export Filter, FieldCondition, MatchValue, RangeCondition,
-       HasIdCondition, IsEmptyCondition, IsNullCondition
+export Filter, FieldCondition, MatchValue, MatchAny, MatchText,
+       RangeCondition, HasIdCondition, IsEmptyCondition, IsNullCondition
 
 # Request types
 export SearchRequest, RecommendRequest, QueryRequest, DiscoverRequest
 
+# Payload index types
+export TextIndexParams
+
 # Serialization
-export todict
+export to_dict, serialize_body
 
 # Collections API
 export list_collections, create_collection, delete_collection,
@@ -238,5 +317,8 @@ export health_check, get_metrics, get_telemetry
 
 # Distributed API
 export cluster_status
+
+# Payload Index API
+export create_payload_index, delete_payload_index
 
 end # module

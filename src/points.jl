@@ -2,18 +2,15 @@
 # Points API — multiple dispatch on selectors
 # ============================================================================
 
-_pts_path(coll::AbstractString) = "/collections/$coll/points"
+points_path(collection::AbstractString) = "/collections/$collection/points"
 
 # ── Selector dispatch ────────────────────────────────────────────────────
-# Holy-trait style: the _body for selecting points differs by type.
 
-_selector(ids::AbstractVector{<:PointId}) = Dict{String,Any}("points" => collect(ids))
-_selector(f::Filter) = Dict{String,Any}("filter" => todict(f))
+point_selector(ids::AbstractVector{<:PointId}) = Dict{String,Any}("points" => collect(ids))
+point_selector(f::Filter) = Dict{String,Any}("filter" => to_dict(f))
+point_selector(id::PointId) = point_selector([id])
 
-# Single-id convenience → wraps into vector
-_selector(id::PointId) = _selector([id])
-
-_wait_q(wait::Bool) = Dict("wait" => wait)
+wait_query(wait::Bool) = Dict("wait" => wait)
 
 # ============================================================================
 # CRUD
@@ -24,13 +21,14 @@ _wait_q(wait::Bool) = Dict("wait" => wait)
 
 Insert or update points.
 """
-function upsert_points(c::Client, coll::AbstractString, points::AbstractVector{<:PointStruct};
+function upsert_points(c::QdrantConnection, collection::AbstractString,
+                       points::AbstractVector{<:PointStruct};
                        wait::Bool=true, ordering::AbstractString="weak")
-    body = Dict{String,Any}("points" => [todict(p) for p in points], "ordering" => ordering)
-    _rp(HTTP.put, c, _pts_path(coll), body; query=_wait_q(wait))
+    body = Dict{String,Any}("points" => [to_dict(p) for p in points], "ordering" => ordering)
+    execute(HTTP.put, c, points_path(collection), body; query=wait_query(wait))
 end
-upsert_points(coll::AbstractString, pts::AbstractVector{<:PointStruct}; kw...) =
-    upsert_points(get_client(), coll, pts; kw...)
+upsert_points(collection::AbstractString, points::AbstractVector{<:PointStruct}; kw...) =
+    upsert_points(get_client(), collection, points; kw...)
 
 """
     delete_points(client, collection, selector; wait=true)
@@ -42,11 +40,14 @@ Delete points by IDs or filter.
 - `selector::PointId` — delete single point
 - `selector::Filter` — delete by filter
 """
-function delete_points(c::Client, coll::AbstractString, sel::Union{AbstractVector{<:PointId}, PointId, Filter};
+function delete_points(c::QdrantConnection, collection::AbstractString,
+                       selector::Union{AbstractVector{<:PointId}, PointId, Filter};
                        wait::Bool=true)
-    _rp(HTTP.post, c, _pts_path(coll) * "/delete", _selector(sel); query=_wait_q(wait))
+    execute(HTTP.post, c, points_path(collection) * "/delete",
+            point_selector(selector); query=wait_query(wait))
 end
-delete_points(coll::AbstractString, sel; kw...) = delete_points(get_client(), coll, sel; kw...)
+delete_points(collection::AbstractString, selector; kw...) =
+    delete_points(get_client(), collection, selector; kw...)
 
 """
     get_points(client, collection, ids; with_vectors=false, with_payload=true)
@@ -54,13 +55,20 @@ delete_points(coll::AbstractString, sel; kw...) = delete_points(get_client(), co
 
 Retrieve points by ID(s).
 """
-function get_points(c::Client, coll::AbstractString, ids::AbstractVector{<:PointId};
+function get_points(c::QdrantConnection, collection::AbstractString,
+                    ids::AbstractVector{<:PointId};
                     with_vectors::Bool=false, with_payload::Bool=true)
-    body = Dict{String,Any}("ids" => collect(ids), "with_vectors" => with_vectors, "with_payload" => with_payload)
-    _rp(HTTP.post, c, _pts_path(coll), body)
+    body = Dict{String,Any}(
+        "ids" => collect(ids),
+        "with_vectors" => with_vectors,
+        "with_payload" => with_payload,
+    )
+    execute(HTTP.post, c, points_path(collection), body)
 end
-get_points(c::Client, coll::AbstractString, id::PointId; kw...) = get_points(c, coll, [id]; kw...)
-get_points(coll::AbstractString, ids; kw...) = get_points(get_client(), coll, ids; kw...)
+get_points(c::QdrantConnection, collection::AbstractString, id::PointId; kw...) =
+    get_points(c, collection, [id]; kw...)
+get_points(collection::AbstractString, ids; kw...) =
+    get_points(get_client(), collection, ids; kw...)
 
 # ============================================================================
 # Payload operations — dispatch on selector type
@@ -71,37 +79,44 @@ get_points(coll::AbstractString, ids; kw...) = get_points(get_client(), coll, id
 
 Set payload fields on selected points.
 """
-function set_payload(c::Client, coll::AbstractString, payload::AbstractDict,
-                     sel::Union{AbstractVector{<:PointId}, PointId, Filter}; wait::Bool=true)
-    body = merge(Dict{String,Any}("payload" => payload), _selector(sel))
-    _rp(HTTP.post, c, _pts_path(coll) * "/payload", body; query=_wait_q(wait))
+function set_payload(c::QdrantConnection, collection::AbstractString, payload::AbstractDict,
+                     selector::Union{AbstractVector{<:PointId}, PointId, Filter};
+                     wait::Bool=true)
+    body = merge(Dict{String,Any}("payload" => payload), point_selector(selector))
+    execute(HTTP.post, c, points_path(collection) * "/payload", body; query=wait_query(wait))
 end
-set_payload(coll::AbstractString, payload::AbstractDict, sel; kw...) =
-    set_payload(get_client(), coll, payload, sel; kw...)
+set_payload(collection::AbstractString, payload::AbstractDict, selector; kw...) =
+    set_payload(get_client(), collection, payload, selector; kw...)
 
 """
     delete_payload(client, collection, keys, selector; wait=true)
 
 Delete payload keys from selected points.
 """
-function delete_payload(c::Client, coll::AbstractString, keys::AbstractVector{<:AbstractString},
-                        sel::Union{AbstractVector{<:PointId}, PointId, Filter}; wait::Bool=true)
-    body = merge(Dict{String,Any}("keys" => collect(keys)), _selector(sel))
-    _rp(HTTP.post, c, _pts_path(coll) * "/payload/delete", body; query=_wait_q(wait))
+function delete_payload(c::QdrantConnection, collection::AbstractString,
+                        keys::AbstractVector{<:AbstractString},
+                        selector::Union{AbstractVector{<:PointId}, PointId, Filter};
+                        wait::Bool=true)
+    body = merge(Dict{String,Any}("keys" => collect(keys)), point_selector(selector))
+    execute(HTTP.post, c, points_path(collection) * "/payload/delete", body;
+            query=wait_query(wait))
 end
-delete_payload(coll::AbstractString, keys::AbstractVector{<:AbstractString}, sel; kw...) =
-    delete_payload(get_client(), coll, keys, sel; kw...)
+delete_payload(collection::AbstractString, keys::AbstractVector{<:AbstractString}, selector; kw...) =
+    delete_payload(get_client(), collection, keys, selector; kw...)
 
 """
     clear_payload(client, collection, selector; wait=true)
 
 Remove all payload from selected points.
 """
-function clear_payload(c::Client, coll::AbstractString,
-                       sel::Union{AbstractVector{<:PointId}, PointId, Filter}; wait::Bool=true)
-    _rp(HTTP.post, c, _pts_path(coll) * "/payload/clear", _selector(sel); query=_wait_q(wait))
+function clear_payload(c::QdrantConnection, collection::AbstractString,
+                       selector::Union{AbstractVector{<:PointId}, PointId, Filter};
+                       wait::Bool=true)
+    execute(HTTP.post, c, points_path(collection) * "/payload/clear",
+            point_selector(selector); query=wait_query(wait))
 end
-clear_payload(coll::AbstractString, sel; kw...) = clear_payload(get_client(), coll, sel; kw...)
+clear_payload(collection::AbstractString, selector; kw...) =
+    clear_payload(get_client(), collection, selector; kw...)
 
 # ============================================================================
 # Vector operations
@@ -112,26 +127,29 @@ clear_payload(coll::AbstractString, sel; kw...) = clear_payload(get_client(), co
 
 Update vectors for existing points.
 """
-function update_vectors(c::Client, coll::AbstractString, points::AbstractVector{<:PointStruct};
-                        wait::Bool=true)
-    body = Dict{String,Any}("points" => [todict(p) for p in points])
-    _rp(HTTP.put, c, _pts_path(coll) * "/vectors", body; query=_wait_q(wait))
+function update_vectors(c::QdrantConnection, collection::AbstractString,
+                        points::AbstractVector; wait::Bool=true)
+    body = Dict{String,Any}("points" => [p isa AbstractQdrantType ? to_dict(p) : p for p in points])
+    execute(HTTP.put, c, points_path(collection) * "/vectors", body; query=wait_query(wait))
 end
-update_vectors(coll::AbstractString, pts::AbstractVector{<:PointStruct}; kw...) =
-    update_vectors(get_client(), coll, pts; kw...)
+update_vectors(collection::AbstractString, points::AbstractVector; kw...) =
+    update_vectors(get_client(), collection, points; kw...)
 
 """
     delete_vectors(client, collection, vector_names, selector; wait=true)
 
 Delete named vector fields from selected points.
 """
-function delete_vectors(c::Client, coll::AbstractString, names::AbstractVector{<:AbstractString},
-                        sel::Union{AbstractVector{<:PointId}, PointId, Filter}; wait::Bool=true)
-    body = merge(Dict{String,Any}("vector_names" => collect(names)), _selector(sel))
-    _rp(HTTP.post, c, _pts_path(coll) * "/vectors/delete", body; query=_wait_q(wait))
+function delete_vectors(c::QdrantConnection, collection::AbstractString,
+                        names::AbstractVector{<:AbstractString},
+                        selector::Union{AbstractVector{<:PointId}, PointId, Filter};
+                        wait::Bool=true)
+    body = merge(Dict{String,Any}("vector" => collect(names)), point_selector(selector))
+    execute(HTTP.post, c, points_path(collection) * "/vectors/delete", body;
+            query=wait_query(wait))
 end
-delete_vectors(coll::AbstractString, names::AbstractVector{<:AbstractString}, sel; kw...) =
-    delete_vectors(get_client(), coll, names, sel; kw...)
+delete_vectors(collection::AbstractString, names::AbstractVector{<:AbstractString}, selector; kw...) =
+    delete_vectors(get_client(), collection, names, selector; kw...)
 
 # ============================================================================
 # Scroll & Count
@@ -142,29 +160,35 @@ delete_vectors(coll::AbstractString, names::AbstractVector{<:AbstractString}, se
 
 Scroll through points with optional filtering.
 """
-function scroll_points(c::Client, coll::AbstractString;
-                       filter::Union{Nothing,Filter}=nothing,
+function scroll_points(c::QdrantConnection, collection::AbstractString;
+                       filter::Optional{Filter}=nothing,
                        limit::Int=10, offset=nothing,
                        with_vectors::Bool=false, with_payload::Bool=true)
-    body = Dict{String,Any}("limit" => limit, "with_vectors" => with_vectors, "with_payload" => with_payload)
-    filter !== nothing && (body["filter"] = todict(filter))
+    body = Dict{String,Any}(
+        "limit" => limit,
+        "with_vectors" => with_vectors,
+        "with_payload" => with_payload,
+    )
+    filter !== nothing && (body["filter"] = to_dict(filter))
     offset !== nothing && (body["offset"] = offset)
-    _rp(HTTP.post, c, _pts_path(coll) * "/scroll", body)
+    execute(HTTP.post, c, points_path(collection) * "/scroll", body)
 end
-scroll_points(coll::AbstractString; kw...) = scroll_points(get_client(), coll; kw...)
+scroll_points(collection::AbstractString; kw...) =
+    scroll_points(get_client(), collection; kw...)
 
 """
     count_points(client, collection; filter, exact)
 
 Count points in a collection.
 """
-function count_points(c::Client, coll::AbstractString;
-                      filter::Union{Nothing,Filter}=nothing, exact::Bool=false)
+function count_points(c::QdrantConnection, collection::AbstractString;
+                      filter::Optional{Filter}=nothing, exact::Bool=false)
     body = Dict{String,Any}("exact" => exact)
-    filter !== nothing && (body["filter"] = todict(filter))
-    _rp(HTTP.post, c, _pts_path(coll) * "/count", body)
+    filter !== nothing && (body["filter"] = to_dict(filter))
+    execute(HTTP.post, c, points_path(collection) * "/count", body)
 end
-count_points(coll::AbstractString; kw...) = count_points(get_client(), coll; kw...)
+count_points(collection::AbstractString; kw...) =
+    count_points(get_client(), collection; kw...)
 
 # ============================================================================
 # Batch
@@ -175,9 +199,48 @@ count_points(coll::AbstractString; kw...) = count_points(get_client(), coll; kw.
 
 Execute multiple point operations in a single batch call.
 """
-function batch_points(c::Client, coll::AbstractString, ops::AbstractVector; wait::Bool=true)
-    body = Dict{String,Any}("operations" => ops)
-    _rp(HTTP.post, c, _pts_path(coll) * "/batch", body; query=_wait_q(wait))
+function batch_points(c::QdrantConnection, collection::AbstractString,
+                      operations::AbstractVector; wait::Bool=true)
+    body = Dict{String,Any}("operations" => operations)
+    execute(HTTP.post, c, points_path(collection) * "/batch", body; query=wait_query(wait))
 end
-batch_points(coll::AbstractString, ops::AbstractVector; kw...) =
-    batch_points(get_client(), coll, ops; kw...)
+batch_points(collection::AbstractString, operations::AbstractVector; kw...) =
+    batch_points(get_client(), collection, operations; kw...)
+
+# ============================================================================
+# Payload Index
+# ============================================================================
+
+"""
+    create_payload_index(client, collection, field_name; field_schema, wait=true)
+
+Create an index on a payload field.
+"""
+function create_payload_index(c::QdrantConnection, collection::AbstractString,
+                              field_name::AbstractString;
+                              field_schema::Union{String, AbstractQdrantType, Dict, Nothing}=nothing,
+                              wait::Bool=true)
+    body = Dict{String,Any}("field_name" => field_name)
+    if field_schema isa AbstractQdrantType
+        body["field_schema"] = to_dict(field_schema)
+    elseif field_schema !== nothing
+        body["field_schema"] = field_schema
+    end
+    execute(HTTP.put, c, collection_path(collection) * "/index", body;
+            query=wait_query(wait))
+end
+create_payload_index(collection::AbstractString, field_name::AbstractString; kw...) =
+    create_payload_index(get_client(), collection, field_name; kw...)
+
+"""
+    delete_payload_index(client, collection, field_name; wait=true)
+
+Delete an index on a payload field.
+"""
+function delete_payload_index(c::QdrantConnection, collection::AbstractString,
+                              field_name::AbstractString; wait::Bool=true)
+    execute(HTTP.delete, c, collection_path(collection) * "/index/$field_name";
+            query=wait_query(wait))
+end
+delete_payload_index(collection::AbstractString, field_name::AbstractString; kw...) =
+    delete_payload_index(get_client(), collection, field_name; kw...)

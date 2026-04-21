@@ -1,11 +1,29 @@
 # ============================================================================
+# Type Aliases
+# ============================================================================
+
+"""
+    Optional{T}
+
+Alias for `Union{Nothing, T}`. Used throughout for optional fields.
+"""
+const Optional{T} = Union{Nothing, T}
+
+"""
+    PointId
+
+A unique point identifier — integer or UUID string.
+"""
+const PointId = Union{Int, String}
+
+# ============================================================================
 # Abstract Type Hierarchy
 # ============================================================================
 
 """
     AbstractQdrantType
 
-Root of the Qdrant type hierarchy. Enables generic `todict` serialization.
+Root of the Qdrant type hierarchy. All Qdrant structs subtype this.
 """
 abstract type AbstractQdrantType end
 
@@ -40,25 +58,11 @@ abstract type AbstractCondition <: AbstractQdrantType end
 Vector distance metric.
 
 Values: `Cosine`, `Euclid`, `Dot`, `Manhattan`
-
-# Examples
-```julia
-VectorParams(size=128, distance=Cosine)
-VectorParams(size=4, distance=Dot)
-```
 """
 @enum Distance Cosine Euclid Dot Manhattan
 
-# ============================================================================
-# Point Identity
-# ============================================================================
-
-"""
-    PointId
-
-A unique point identifier — integer or UUID string.
-"""
-const PointId = Union{Int, String}
+# StructUtils integration: serialize enum as string name
+StructUtils.lower(d::Distance) = string(d)
 
 # ============================================================================
 # Vector Parameters
@@ -75,12 +79,12 @@ VectorParams(size=128, distance=Cosine)
 VectorParams(size=4, distance=Dot, on_disk=true)
 ```
 """
-Base.@kwdef struct VectorParams <: AbstractConfig
+StructUtils.@kwarg struct VectorParams <: AbstractConfig
     size::Int
     distance::Distance
-    hnsw_config::Union{Nothing, Dict} = nothing
-    quantization_config::Union{Nothing, Dict} = nothing
-    on_disk::Union{Nothing, Bool} = nothing
+    hnsw_config::Optional{Dict{String,Any}} = nothing
+    quantization_config::Optional{Dict{String,Any}} = nothing
+    on_disk::Optional{Bool} = nothing
 end
 
 """
@@ -88,8 +92,8 @@ end
 
 Configuration for sparse vector fields.
 """
-Base.@kwdef struct SparseVectorParams <: AbstractConfig
-    index::Bool
+StructUtils.@kwarg struct SparseVectorParams <: AbstractConfig
+    index::Optional{Dict{String,Any}} = nothing
 end
 
 # ============================================================================
@@ -107,17 +111,19 @@ CollectionConfig(vectors=VectorParams(size=128, distance=Cosine))
 CollectionConfig(vectors=VectorParams(size=4, distance=Dot), on_disk_payload=true)
 ```
 """
-Base.@kwdef struct CollectionConfig <: AbstractConfig
-    vectors::Union{VectorParams, Dict}
-    sparse_vectors::Union{Nothing, Dict} = nothing
-    shard_number::Union{Nothing, Int} = nothing
-    replication_factor::Union{Nothing, Int} = nothing
-    write_consistency_factor::Union{Nothing, Int} = nothing
-    on_disk_payload::Union{Nothing, Bool} = nothing
-    hnsw_config::Union{Nothing, Dict} = nothing
-    wal_config::Union{Nothing, Dict} = nothing
-    optimizers_config::Union{Nothing, Dict} = nothing
-    init_from::Union{Nothing, Dict} = nothing
+StructUtils.@kwarg struct CollectionConfig <: AbstractConfig
+    vectors::Union{VectorParams, Dict{String,VectorParams}, Dict{String,Any}}
+    sparse_vectors::Optional{Dict{String,Any}} = nothing
+    shard_number::Optional{Int} = nothing
+    replication_factor::Optional{Int} = nothing
+    write_consistency_factor::Optional{Int} = nothing
+    on_disk_payload::Optional{Bool} = nothing
+    hnsw_config::Optional{Dict{String,Any}} = nothing
+    wal_config::Optional{Dict{String,Any}} = nothing
+    optimizers_config::Optional{Dict{String,Any}} = nothing
+    init_from::Optional{Dict{String,Any}} = nothing
+    quantization_config::Optional{Dict{String,Any}} = nothing
+    sharding_method::Optional{String} = nothing
 end
 
 """
@@ -125,9 +131,12 @@ end
 
 Patch payload for updating collection parameters.
 """
-Base.@kwdef struct CollectionUpdate <: AbstractConfig
-    optimizers_config::Union{Nothing, Dict} = nothing
-    params::Union{Nothing, Dict} = nothing
+StructUtils.@kwarg struct CollectionUpdate <: AbstractConfig
+    optimizers_config::Optional{Dict{String,Any}} = nothing
+    params::Optional{Dict{String,Any}} = nothing
+    hnsw_config::Optional{Dict{String,Any}} = nothing
+    quantization_config::Optional{Dict{String,Any}} = nothing
+    vectors::Optional{Dict{String,Any}} = nothing
 end
 
 # ============================================================================
@@ -142,17 +151,99 @@ A point with id, vector(s), and optional payload.
 # Examples
 ```julia
 PointStruct(id=1, vector=Float32[0.1, 0.2, 0.3], payload=Dict("label" => "cat"))
+PointStruct(id="uuid-here", vector=Dict("image" => Float32[...], "text" => Float32[...]))
 ```
 """
-Base.@kwdef struct PointStruct <: AbstractQdrantType
+StructUtils.@kwarg struct PointStruct <: AbstractQdrantType
     id::PointId
-    vector::Union{Vector{Float32}, Dict{String, Vector{Float32}}}
-    payload::Union{Nothing, Dict} = nothing
+    vector::Union{Vector{Float32}, Vector{Float64}, Dict{String,Any}, Dict{String,Vector{Float32}}, Dict{String,Vector{Float64}}}
+    payload::Optional{Dict{String,Any}} = nothing
 end
 
 # ============================================================================
 # Filters & Conditions
 # ============================================================================
+
+"""
+    MatchValue <: AbstractCondition
+
+Match a specific value.
+"""
+StructUtils.@kwarg struct MatchValue <: AbstractCondition
+    value::Union{String, Int, Float64, Bool}
+end
+
+"""
+    MatchAny <: AbstractCondition
+
+Match any of the given values.
+"""
+StructUtils.@kwarg struct MatchAny <: AbstractCondition
+    any::Vector{Any}
+end
+
+"""
+    MatchText <: AbstractCondition
+
+Full-text match.
+"""
+StructUtils.@kwarg struct MatchText <: AbstractCondition
+    text::String
+end
+
+"""
+    RangeCondition <: AbstractCondition
+
+Range comparison filter.
+"""
+StructUtils.@kwarg struct RangeCondition <: AbstractCondition
+    gte::Optional{Float64} = nothing
+    gt::Optional{Float64} = nothing
+    lte::Optional{Float64} = nothing
+    lt::Optional{Float64} = nothing
+end
+
+"""
+    FieldCondition <: AbstractCondition
+
+Condition on a specific payload field.
+"""
+StructUtils.@kwarg struct FieldCondition <: AbstractCondition
+    key::String
+    range::Optional{RangeCondition} = nothing
+    match::Optional{Union{MatchValue, MatchAny, MatchText, Dict{String,Any}}} = nothing
+    geo_bounding_box::Optional{Dict{String,Any}} = nothing
+    geo_radius::Optional{Dict{String,Any}} = nothing
+    geo_polygon::Optional{Dict{String,Any}} = nothing
+    values_count::Optional{Dict{String,Any}} = nothing
+end
+
+"""
+    HasIdCondition <: AbstractCondition
+
+Filter points by ID.
+"""
+StructUtils.@kwarg struct HasIdCondition <: AbstractCondition
+    has_id::Vector{PointId}
+end
+
+"""
+    IsEmptyCondition <: AbstractCondition
+
+Filter for empty fields.
+"""
+StructUtils.@kwarg struct IsEmptyCondition <: AbstractCondition
+    is_empty::Dict{String,Any}
+end
+
+"""
+    IsNullCondition <: AbstractCondition
+
+Filter for null fields.
+"""
+StructUtils.@kwarg struct IsNullCondition <: AbstractCondition
+    is_null::Dict{String,Any}
+end
 
 """
     Filter <: AbstractCondition
@@ -164,73 +255,11 @@ Compound filter with `must`, `should`, `must_not` clauses.
 Filter(must=[Dict("key" => "color", "match" => Dict("value" => "red"))])
 ```
 """
-Base.@kwdef struct Filter <: AbstractCondition
-    must::Union{Nothing, Vector{Dict}} = nothing
-    should::Union{Nothing, Vector{Dict}} = nothing
-    must_not::Union{Nothing, Vector{Dict}} = nothing
-end
-
-"""
-    FieldCondition <: AbstractCondition
-
-Condition on a specific payload field.
-"""
-Base.@kwdef struct FieldCondition <: AbstractCondition
-    key::String
-    range::Union{Nothing, Dict} = nothing
-    match::Union{Nothing, Dict} = nothing
-    geo_bounding_box::Union{Nothing, Dict} = nothing
-    geo_radius::Union{Nothing, Dict} = nothing
-    geo_polygon::Union{Nothing, Dict} = nothing
-    values_count::Union{Nothing, Dict} = nothing
-end
-
-"""
-    MatchValue <: AbstractCondition
-
-Match a specific value.
-"""
-Base.@kwdef struct MatchValue <: AbstractCondition
-    value::Union{String, Int, Float64, Bool}
-end
-
-"""
-    RangeCondition <: AbstractCondition
-
-Range comparison filter.
-"""
-Base.@kwdef struct RangeCondition <: AbstractCondition
-    gte::Union{Nothing, Float64} = nothing
-    gt::Union{Nothing, Float64} = nothing
-    lte::Union{Nothing, Float64} = nothing
-    lt::Union{Nothing, Float64} = nothing
-end
-
-"""
-    HasIdCondition <: AbstractCondition
-
-Filter points by ID.
-"""
-Base.@kwdef struct HasIdCondition <: AbstractCondition
-    has_id::Vector{PointId}
-end
-
-"""
-    IsEmptyCondition <: AbstractCondition
-
-Filter for empty fields.
-"""
-Base.@kwdef struct IsEmptyCondition <: AbstractCondition
-    is_empty::Dict
-end
-
-"""
-    IsNullCondition <: AbstractCondition
-
-Filter for null fields.
-"""
-Base.@kwdef struct IsNullCondition <: AbstractCondition
-    is_null::Dict
+StructUtils.@kwarg struct Filter <: AbstractCondition
+    must::Optional{Vector{Any}} = nothing
+    should::Optional{Vector{Any}} = nothing
+    must_not::Optional{Vector{Any}} = nothing
+    min_should::Optional{Dict{String,Any}} = nothing
 end
 
 # ============================================================================
@@ -248,17 +277,16 @@ SearchRequest(vector=Float32[1,0,0,0], limit=10)
 SearchRequest(vector=Float32[1,0,0,0], limit=5, with_payload=true)
 ```
 """
-Base.@kwdef struct SearchRequest <: AbstractRequest
-    vector::Union{Vector{Float32}, String, Dict}
+StructUtils.@kwarg struct SearchRequest <: AbstractRequest
+    vector::Union{Vector{Float32}, Vector{Float64}, String, Dict{String,Any}}
     limit::Int
-    filter::Union{Nothing, Filter} = nothing
-    offset::Union{Nothing, Int} = nothing
-    with_payload::Union{Nothing, Bool, Vector{String}} = nothing
-    with_vector::Union{Nothing, Bool, Vector{String}} = nothing
-    score_threshold::Union{Nothing, Float32} = nothing
-    vector_name::Union{Nothing, String} = nothing
-    lookup_from::Union{Nothing, Dict} = nothing
-    search_params::Union{Nothing, Dict} = nothing
+    filter::Optional{Filter} = nothing
+    offset::Optional{Int} = nothing
+    with_payload::Optional{Union{Bool, Vector{String}}} = nothing
+    with_vector::Optional{Union{Bool, Vector{String}}} = nothing
+    score_threshold::Optional{Float64} = nothing
+    lookup_from::Optional{Dict{String,Any}} = nothing
+    params::Optional{Dict{String,Any}} = nothing
 end
 
 """
@@ -266,33 +294,37 @@ end
 
 Recommendation request based on positive/negative examples.
 """
-Base.@kwdef struct RecommendRequest <: AbstractRequest
-    positive::Union{Nothing, Vector{PointId}} = nothing
-    negative::Union{Nothing, Vector{PointId}} = nothing
+StructUtils.@kwarg struct RecommendRequest <: AbstractRequest
+    positive::Optional{Vector{Any}} = nothing
+    negative::Optional{Vector{Any}} = nothing
     limit::Int
-    filter::Union{Nothing, Filter} = nothing
-    offset::Union{Nothing, Int} = nothing
-    with_payload::Union{Nothing, Bool, Vector{String}} = nothing
-    with_vector::Union{Nothing, Bool, Vector{String}} = nothing
-    score_threshold::Union{Nothing, Float32} = nothing
-    vector_name::Union{Nothing, String} = nothing
-    lookup_from::Union{Nothing, Dict} = nothing
-    search_params::Union{Nothing, Dict} = nothing
+    filter::Optional{Filter} = nothing
+    offset::Optional{Int} = nothing
+    with_payload::Optional{Union{Bool, Vector{String}}} = nothing
+    with_vector::Optional{Union{Bool, Vector{String}}} = nothing
+    score_threshold::Optional{Float64} = nothing
+    lookup_from::Optional{Dict{String,Any}} = nothing
+    params::Optional{Dict{String,Any}} = nothing
+    strategy::Optional{String} = nothing
+    using_::Optional{String} = nothing &(name="using",)
 end
 
 """
     QueryRequest <: AbstractRequest
 
-Advanced query request.
+Advanced query request (Qdrant universal query API).
 """
-Base.@kwdef struct QueryRequest <: AbstractRequest
-    query::Union{Vector{Float32}, String, Dict}
-    limit::Int
-    filter::Union{Nothing, Filter} = nothing
-    offset::Union{Nothing, Int} = nothing
-    with_payload::Union{Nothing, Bool, Vector{String}} = nothing
-    with_vector::Union{Nothing, Bool, Vector{String}} = nothing
-    score_threshold::Union{Nothing, Float32} = nothing
+StructUtils.@kwarg struct QueryRequest <: AbstractRequest
+    query::Optional{Union{Vector{Float32}, Vector{Float64}, String, Dict{String,Any}}} = nothing
+    limit::Optional{Int} = nothing
+    filter::Optional{Filter} = nothing
+    offset::Optional{Int} = nothing
+    with_payload::Optional{Union{Bool, Vector{String}}} = nothing
+    with_vector::Optional{Union{Bool, Vector{String}}} = nothing
+    score_threshold::Optional{Float64} = nothing
+    using_::Optional{String} = nothing &(name="using",)
+    prefetch::Optional{Union{Dict{String,Any}, Vector{Any}}} = nothing
+    params::Optional{Dict{String,Any}} = nothing
 end
 
 """
@@ -300,12 +332,29 @@ end
 
 Discovery request — find points near a target with optional context.
 """
-Base.@kwdef struct DiscoverRequest <: AbstractRequest
-    target::Union{PointId, Vector{Float32}, Dict}
+StructUtils.@kwarg struct DiscoverRequest <: AbstractRequest
+    target::Union{PointId, Vector{Float32}, Vector{Float64}, Dict{String,Any}}
     limit::Int
-    context::Union{Nothing, Vector{Dict}} = nothing
-    filter::Union{Nothing, Filter} = nothing
-    offset::Union{Nothing, Int} = nothing
-    with_payload::Union{Nothing, Bool, Vector{String}} = nothing
-    with_vector::Union{Nothing, Bool, Vector{String}} = nothing
+    context::Optional{Vector{Any}} = nothing
+    filter::Optional{Filter} = nothing
+    offset::Optional{Int} = nothing
+    with_payload::Optional{Union{Bool, Vector{String}}} = nothing
+    with_vector::Optional{Union{Bool, Vector{String}}} = nothing
+end
+
+# ============================================================================
+# Payload Index Types
+# ============================================================================
+
+"""
+    TextIndexParams <: AbstractConfig
+
+Configuration for full-text index on a payload field.
+"""
+StructUtils.@kwarg struct TextIndexParams <: AbstractConfig
+    type::String = "text"
+    tokenizer::Optional{String} = nothing
+    min_token_len::Optional{Int} = nothing
+    max_token_len::Optional{Int} = nothing
+    lowercase::Optional{Bool} = nothing
 end
