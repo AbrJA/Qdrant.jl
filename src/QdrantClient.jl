@@ -188,11 +188,11 @@ Low-level HTTP request with error handling and connection pooling.
 """
 function http_request(method::Function, conn::QdrantConnection{HTTPTransport},
                       path::AbstractString, body=nothing; query=nothing)
-    t = conn.transport
-    url = transport_url(t, path)
+    transport = conn.transport
+    url = transport_url(transport, path)
     kw = Dict{Symbol,Any}(
-        :pool             => ensure_pool!(t),
-        :headers          => transport_headers(t),
+        :pool             => ensure_pool!(transport),
+        :headers          => transport_headers(transport),
         :status_exception => false,
     )
     query !== nothing && (kw[:query] = query)
