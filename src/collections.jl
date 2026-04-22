@@ -81,7 +81,7 @@ update_collection(name::AbstractString; kwargs...) =
 # ── Aliases ──────────────────────────────────────────────────────────────
 
 alias_action_body(action::AbstractString, payload::AbstractDict) =
-    Dict{String,Any}("actions" => [Dict(action => Dict(payload))])
+    Dict{String,Any}("actions" => [Dict(action => payload)])
 
 """
     list_aliases(client) -> Dict

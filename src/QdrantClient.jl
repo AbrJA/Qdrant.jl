@@ -141,8 +141,7 @@ end
 Return the global default client, creating one if needed.
 """
 function get_client()
-    isassigned(_GLOBAL_CLIENT) || (_GLOBAL_CLIENT[] = QdrantConnection())
-    _GLOBAL_CLIENT[]
+    isassigned(_GLOBAL_CLIENT) ? _GLOBAL_CLIENT[] : (_GLOBAL_CLIENT[] = QdrantConnection())
 end
 
 # ============================================================================
@@ -156,8 +155,6 @@ const _JSON_KW = (omit_null=true, omit_empty=true)
 
 Serialize a value to JSON, stripping `nothing` fields and empty collections.
 """
-serialize_body(x::AbstractQdrantType) = JSON.json(x; _JSON_KW...)
-serialize_body(x::AbstractDict) = JSON.json(x; _JSON_KW...)
 serialize_body(x) = JSON.json(x; _JSON_KW...)
 
 # ============================================================================

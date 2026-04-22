@@ -218,12 +218,10 @@ Create an index on a payload field.
 """
 function create_payload_index(c::QdrantConnection, collection::AbstractString,
                               field_name::AbstractString;
-                              field_schema::Union{String, AbstractQdrantType, Dict, Nothing}=nothing,
+                              field_schema::Union{String, AbstractQdrantType, AbstractDict, Nothing}=nothing,
                               wait::Bool=true)
     body = Dict{String,Any}("field_name" => field_name)
-    if field_schema isa AbstractQdrantType
-        body["field_schema"] = field_schema
-    elseif field_schema !== nothing
+    if field_schema !== nothing
         body["field_schema"] = field_schema
     end
     execute(HTTP.put, c, collection_path(collection) * "/index", body;
