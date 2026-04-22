@@ -55,6 +55,15 @@
         cleanup_collection(CONN, name)
     end
 
+    @testset "Collection Optimizations" begin
+        name = unique_name("opt")
+        cleanup_collection(CONN, name)
+        create_collection(CONN, name, CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+        opt = get_collection_optimizations(CONN, name)
+        @test opt.result isa AbstractDict
+        cleanup_collection(CONN, name)
+    end
+
     @testset "Aliases" begin
         name = unique_name("alias")
         a1, a2 = name * "_a1", name * "_a2"
@@ -195,6 +204,44 @@
         cleanup_collection(CONN, name)
     end
 
+    @testset "Query Groups" begin
+        name = unique_name("qgroups")
+        cleanup_collection(CONN, name)
+        create_collection(CONN, name, CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+        upsert_points(CONN, name, fixture_points(); wait=true)
+
+        qg = query_groups(CONN, name, QueryRequest(
+            query=Float32[1, 0, 0, 0],
+            limit=10,
+            group_by="group",
+            group_size=3,
+            with_payload=true,
+        ))
+        @test qg isa QdrantResponse{GroupsResult}
+        @test length(qg.result.groups) >= 1
+        cleanup_collection(CONN, name)
+    end
+
+    @testset "Search Matrix" begin
+        name = unique_name("matrix")
+        cleanup_collection(CONN, name)
+        create_collection(CONN, name, CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+        upsert_points(CONN, name, fixture_points(); wait=true)
+
+        pairs = search_matrix_pairs(CONN, name; sample=3, limit=10)
+        @test pairs isa QdrantResponse{SearchMatrixPairsResponse}
+        @test pairs.result.pairs isa Vector{Dict{String,Any}}
+
+        offsets = search_matrix_offsets(CONN, name; sample=3, limit=10)
+        @test offsets isa QdrantResponse{SearchMatrixOffsetsResponse}
+        @test offsets.result.offsets_row isa Vector{Int}
+        @test offsets.result.offsets_col isa Vector{Int}
+        @test offsets.result.scores isa Vector{Float64}
+        @test offsets.result.ids isa Vector{PointId}
+
+        cleanup_collection(CONN, name)
+    end
+
     @testset "Snapshots" begin
         name = unique_name("snap")
         cleanup_collection(CONN, name)
@@ -210,6 +257,19 @@
 
         @test delete_snapshot(CONN, name, snap.result.name).result === true
         cleanup_collection(CONN, name)
+    end
+
+    @testset "Full Snapshots" begin
+        full = create_full_snapshot(CONN)
+        @test full isa QdrantResponse{SnapshotInfo}
+        @test !isempty(full.result.name)
+
+        full_list = list_full_snapshots(CONN)
+        @test full_list isa QdrantResponse{Vector{SnapshotInfo}}
+        @test any(s.name == full.result.name for s in full_list.result)
+
+        del = delete_full_snapshot(CONN, full.result.name)
+        @test del.result === true
     end
 
     @testset "Payload Index" begin
@@ -240,6 +300,35 @@
         res = batch_points(CONN, name, ops; wait=true)
         @test res.result isa Vector{UpdateResult}
         @test count_points(CONN, name; exact=true).result.count == 2
+        cleanup_collection(CONN, name)
+    end
+
+    @testset "Vector Operations" begin
+        name = unique_name("vecops")
+        cleanup_collection(CONN, name)
+        cfg = CollectionConfig(vectors=Dict{String,VectorParams}(
+            "dense" => VectorParams(size=4, distance=Dot),
+        ))
+        create_collection(CONN, name, cfg)
+
+        pts = [
+            Point(id=1, vector=Dict{String,Vector{Float32}}("dense" => Float32[1, 0, 0, 0])),
+            Point(id=2, vector=Dict{String,Vector{Float32}}("dense" => Float32[0, 1, 0, 0])),
+        ]
+        upsert_points(CONN, name, pts; wait=true)
+
+        u = update_vectors(CONN, name, [
+            Dict("id" => 1, "vector" => Dict("dense" => Float32[0.5, 0.5, 0, 0]))
+        ])
+        @test u.result.status == "completed"
+
+        got = get_points(CONN, name, [1]; with_vectors=true)
+        v = got.result[1].vector["dense"]
+        @test v[1] ≈ 0.5 atol=0.05
+        @test v[2] ≈ 0.5 atol=0.05
+
+        d = delete_vectors(CONN, name, ["dense"], [2]; wait=true)
+        @test d.result.status == "completed"
         cleanup_collection(CONN, name)
     end
 
@@ -281,6 +370,86 @@
         fr = facet(CONN, name, "group")
         @test fr isa QdrantResponse{FacetResult}
         @test length(fr.result.hits) >= 1
+        cleanup_collection(CONN, name)
+    end
+
+    @testset "Kubernetes Health Probes" begin
+        hz = healthz(CONN)
+        @test hz isa QdrantResponse{String}
+        @test hz.status == "ok"
+
+        lz = livez(CONN)
+        @test lz isa QdrantResponse{String}
+        @test lz.status == "ok"
+
+        rz = readyz(CONN)
+        @test rz isa QdrantResponse{String}
+        @test rz.status == "ok"
+    end
+
+    @testset "Issues API" begin
+        issues = get_issues(CONN)
+        @test issues.result isa AbstractDict
+
+        cleared = clear_issues(CONN)
+        @test cleared isa QdrantResponse{Bool}
+    end
+
+    @testset "Cluster Telemetry" begin
+        # May fail on standalone (non-cluster) Qdrant
+        try
+            ct = cluster_telemetry(CONN)
+            @test ct.result isa AbstractDict
+        catch e
+            @test e isa QdrantError
+        end
+    end
+
+    @testset "Recover Current Peer" begin
+        # May error on standalone (non-cluster) Qdrant
+        try
+            rp = recover_current_peer(CONN)
+            @test rp isa QdrantResponse{Bool}
+        catch e
+            @test e isa QdrantError
+        end
+    end
+
+    @testset "Collection Cluster Info" begin
+        name = unique_name("clinfo")
+        cleanup_collection(CONN, name)
+        create_collection(CONN, name, CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+
+        ci = collection_cluster_info(CONN, name)
+        @test ci.result isa AbstractDict
+
+        cleanup_collection(CONN, name)
+    end
+
+    @testset "Shard Keys" begin
+        name = unique_name("shkey")
+        cleanup_collection(CONN, name)
+        create_collection(CONN, name, CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+
+        keys_resp = list_shard_keys(CONN, name)
+        @test keys_resp.result isa AbstractDict
+
+        cleanup_collection(CONN, name)
+    end
+
+    @testset "Snapshot Recovery" begin
+        name = unique_name("srec")
+        cleanup_collection(CONN, name)
+        create_collection(CONN, name, CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+
+        # Create a snapshot first, then try to recover from a bogus URL (expect error)
+        snap = create_snapshot(CONN, name)
+        @test snap isa QdrantResponse{SnapshotInfo}
+
+        # Recovery from invalid URL should throw
+        @test_throws QdrantError recover_from_snapshot(CONN, name;
+            location="http://nonexistent.invalid/snap.tar")
+
         cleanup_collection(CONN, name)
     end
 

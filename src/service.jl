@@ -56,3 +56,57 @@ function get_telemetry(conn::QdrantConnection{HTTPTransport}=get_client())
     raw, status, time = _unwrap(resp)
     QdrantResponse(raw isa AbstractDict ? raw : Dict{String,Any}(), status, time)
 end
+
+# ── Kubernetes Health Probes ─────────────────────────────────────────────
+
+"""
+    healthz(conn) -> QdrantResponse{String}
+
+Kubernetes health check endpoint.
+"""
+function healthz(conn::QdrantConnection{HTTPTransport}=get_client())
+    resp = http_request(HTTP.get, conn, "/healthz")
+    QdrantResponse(String(resp.body), "ok", 0.0)
+end
+
+"""
+    livez(conn) -> QdrantResponse{String}
+
+Kubernetes liveness probe.
+"""
+function livez(conn::QdrantConnection{HTTPTransport}=get_client())
+    resp = http_request(HTTP.get, conn, "/livez")
+    QdrantResponse(String(resp.body), "ok", 0.0)
+end
+
+"""
+    readyz(conn) -> QdrantResponse{String}
+
+Kubernetes readiness probe.
+"""
+function readyz(conn::QdrantConnection{HTTPTransport}=get_client())
+    resp = http_request(HTTP.get, conn, "/readyz")
+    QdrantResponse(String(resp.body), "ok", 0.0)
+end
+
+# ── Issues ───────────────────────────────────────────────────────────────
+
+"""
+    get_issues(conn) -> QdrantResponse{Dict{String,Any}}
+
+Get performance issues and configuration suggestions.
+"""
+function get_issues(conn::QdrantConnection{HTTPTransport}=get_client())
+    resp = http_request(HTTP.get, conn, "/issues")
+    raw, status, time = _unwrap(resp)
+    QdrantResponse(raw isa AbstractDict ? raw : Dict{String,Any}(), status, time)
+end
+
+"""
+    clear_issues(conn) -> QdrantResponse{Bool}
+
+Clear all reported issues.
+"""
+function clear_issues(conn::QdrantConnection{HTTPTransport}=get_client())
+    parse_bool(http_request(HTTP.delete, conn, "/issues"))
+end

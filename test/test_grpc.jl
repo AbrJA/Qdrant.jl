@@ -264,6 +264,16 @@ end
             ])
             @test length(qb.result) == 2
             @test length(qb.result[1].points) == 2
+
+            qg = query_groups(GRPC_CONN, name, QueryRequest(
+                query=Float32[1, 0, 0, 0],
+                limit=10,
+                group_by="group",
+                group_size=3,
+                with_payload=true,
+            ))
+            @test qg isa QdrantResponse{GroupsResult}
+            @test length(qg.result.groups) >= 1
         finally
             cleanup_collection(GRPC_CONN, name)
         end

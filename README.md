@@ -11,7 +11,7 @@ A high-performance, idiomatic Julia client for the [Qdrant](https://qdrant.tech/
 - **Dual transport** — HTTP/REST and gRPC, selected via Julia's multiple dispatch
 - **Typed responses** — every endpoint returns `QdrantResponse{T}` with `.result`, `.status`, and `.time`
 - **Zero-cost dispatch** — parametric `QdrantConnection{T}` eliminates runtime transport checks
-- **Complete API coverage** — collections, points, queries, snapshots, payload indexes, facets, cluster status
+- **Complete API coverage** — collections, points, queries, snapshots, payload indexes, facets, cluster, shards, health probes
 - **Julian design** — keyword constructors, `@enum` distance, `Union` point IDs, `StructUtils` serialization
 
 ## Installation
@@ -153,6 +153,7 @@ delete_snapshot(conn, collection, name) -> QdrantResponse{Bool}
 create_full_snapshot(conn) -> QdrantResponse{SnapshotInfo}
 list_full_snapshots(conn) -> QdrantResponse{Vector{SnapshotInfo}}
 delete_full_snapshot(conn, name) -> QdrantResponse{Bool}
+recover_from_snapshot(conn, collection; location, priority) -> QdrantResponse{Bool}
 ```
 
 ### Payload Indexes
@@ -169,7 +170,38 @@ health_check(conn) -> QdrantResponse{HealthInfo}
 get_version(conn) -> QdrantResponse{HealthInfo}
 get_metrics(conn) -> QdrantResponse{String}
 get_telemetry(conn) -> QdrantResponse{Dict{String,Any}}
+healthz(conn) -> QdrantResponse{String}
+livez(conn) -> QdrantResponse{String}
+readyz(conn) -> QdrantResponse{String}
+get_issues(conn) -> QdrantResponse{Dict{String,Any}}
+clear_issues(conn) -> QdrantResponse{Bool}
+```
+
+### Cluster & Distributed
+
+```julia
 cluster_status(conn) -> QdrantResponse{Dict{String,Any}}
+cluster_telemetry(conn) -> QdrantResponse{Dict{String,Any}}
+recover_current_peer(conn) -> QdrantResponse{Bool}
+remove_peer(conn, peer_id; force=false) -> QdrantResponse{Bool}
+collection_cluster_info(conn, collection) -> QdrantResponse{Dict{String,Any}}
+update_collection_cluster(conn, collection, operations) -> QdrantResponse{Bool}
+```
+
+### Shard Keys
+
+```julia
+list_shard_keys(conn, collection) -> QdrantResponse{Dict{String,Any}}
+create_shard_key(conn, collection, request) -> QdrantResponse{Bool}
+delete_shard_key(conn, collection, request) -> QdrantResponse{Bool}
+```
+
+### Shard Snapshots
+
+```julia
+create_shard_snapshot(conn, collection, shard_id) -> QdrantResponse{SnapshotInfo}
+list_shard_snapshots(conn, collection, shard_id) -> QdrantResponse{Vector{SnapshotInfo}}
+delete_shard_snapshot(conn, collection, shard_id, name) -> QdrantResponse{Bool}
 ```
 
 ## Type Reference

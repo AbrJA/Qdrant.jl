@@ -454,16 +454,21 @@ export facet
 
 # Snapshots API
 export create_snapshot, list_snapshots, delete_snapshot,
-       create_full_snapshot, list_full_snapshots, delete_full_snapshot
+       create_full_snapshot, list_full_snapshots, delete_full_snapshot,
+       recover_from_snapshot
 
 # Service API
-export health_check, get_metrics, get_telemetry, get_version
+export health_check, get_metrics, get_telemetry, get_version,
+       healthz, livez, readyz, get_issues, clear_issues
 
 # Payload index API
 export create_payload_index, delete_payload_index
 
 # Distributed API
-export cluster_status
+export cluster_status, cluster_telemetry, recover_current_peer, remove_peer,
+       collection_cluster_info, update_collection_cluster,
+       list_shard_keys, create_shard_key, delete_shard_key,
+       create_shard_snapshot, list_shard_snapshots, delete_shard_snapshot
 
 # gRPC utilities (advanced)
 export to_proto_point, from_proto_scored_point, from_proto_retrieved_point

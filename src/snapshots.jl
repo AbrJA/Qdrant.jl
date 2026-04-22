@@ -51,3 +51,27 @@ function delete_full_snapshot(conn::QdrantConnection{HTTPTransport}, name::Abstr
     parse_bool(http_request(HTTP.delete, conn, "/snapshots/$name"))
 end
 delete_full_snapshot(name::AbstractString) = delete_full_snapshot(get_client(), name)
+
+# ── Snapshot Recovery ────────────────────────────────────────────────────
+
+"""
+    recover_from_snapshot(conn, collection; location, priority) -> QdrantResponse{Bool}
+
+Recover a collection from a snapshot URL or local path.
+
+# Examples
+```julia
+recover_from_snapshot(conn, "demo"; location="http://host/snapshot.tar")
+recover_from_snapshot(conn, "demo"; location="file:///data/snapshot.tar")
+```
+"""
+function recover_from_snapshot(conn::QdrantConnection{HTTPTransport},
+                               collection::AbstractString;
+                               location::AbstractString,
+                               priority::Optional{String}=nothing)
+    body = Dict{String,Any}("location" => location)
+    priority !== nothing && (body["priority"] = priority)
+    parse_bool(http_request(HTTP.put, conn, "/collections/$collection/snapshots/recover", body))
+end
+recover_from_snapshot(collection::AbstractString; kw...) =
+    recover_from_snapshot(get_client(), collection; kw...)

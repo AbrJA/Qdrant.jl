@@ -88,6 +88,7 @@ delete_snapshot
 create_full_snapshot
 list_full_snapshots
 delete_full_snapshot
+recover_from_snapshot
 ```
 
 ### Service
@@ -97,7 +98,38 @@ health_check
 get_version
 get_metrics
 get_telemetry
+healthz
+livez
+readyz
+get_issues
+clear_issues
+```
+
+### Cluster & Distributed
+
+```@docs
 cluster_status
+cluster_telemetry
+recover_current_peer
+remove_peer
+collection_cluster_info
+update_collection_cluster
+```
+
+### Shard Keys
+
+```@docs
+list_shard_keys
+create_shard_key
+delete_shard_key
+```
+
+### Shard Snapshots
+
+```@docs
+create_shard_snapshot
+list_shard_snapshots
+delete_shard_snapshot
 ```
 
 ### Payload Indexes
