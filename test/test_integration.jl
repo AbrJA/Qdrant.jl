@@ -376,15 +376,18 @@
     @testset "Kubernetes Health Probes" begin
         hz = healthz(CONN)
         @test hz isa QdrantResponse{String}
-        @test hz.status == "ok"
+        @test hz.status == ""
+        @test !isempty(hz.result)
 
         lz = livez(CONN)
         @test lz isa QdrantResponse{String}
-        @test lz.status == "ok"
+        @test lz.status == ""
+        @test !isempty(lz.result)
 
         rz = readyz(CONN)
         @test rz isa QdrantResponse{String}
-        @test rz.status == "ok"
+        @test rz.status == ""
+        @test !isempty(rz.result)
     end
 
     @testset "Issues API" begin

@@ -39,11 +39,11 @@ end
 """
     get_metrics(conn) -> QdrantResponse{String}
 
-Retrieve Prometheus-format metrics.
+Retrieve Prometheus-format metrics (plain text response).
 """
 function get_metrics(conn::QdrantConnection{HTTPTransport}=get_client())
     resp = http_request(HTTP.get, conn, "/metrics")
-    QdrantResponse(String(resp.body), "ok", 0.0)
+    QdrantResponse(String(resp.body), "", 0.0)  # plain text, no status field
 end
 
 """
@@ -62,31 +62,31 @@ end
 """
     healthz(conn) -> QdrantResponse{String}
 
-Kubernetes health check endpoint.
+Kubernetes health check endpoint (plain text response).
 """
 function healthz(conn::QdrantConnection{HTTPTransport}=get_client())
     resp = http_request(HTTP.get, conn, "/healthz")
-    QdrantResponse(String(resp.body), "ok", 0.0)
+    QdrantResponse(String(resp.body), "", 0.0)  # plain text, no status field
 end
 
 """
     livez(conn) -> QdrantResponse{String}
 
-Kubernetes liveness probe.
+Kubernetes liveness probe (plain text response).
 """
 function livez(conn::QdrantConnection{HTTPTransport}=get_client())
     resp = http_request(HTTP.get, conn, "/livez")
-    QdrantResponse(String(resp.body), "ok", 0.0)
+    QdrantResponse(String(resp.body), "", 0.0)  # plain text, no status field
 end
 
 """
     readyz(conn) -> QdrantResponse{String}
 
-Kubernetes readiness probe.
+Kubernetes readiness probe (plain text response).
 """
 function readyz(conn::QdrantConnection{HTTPTransport}=get_client())
     resp = http_request(HTTP.get, conn, "/readyz")
-    QdrantResponse(String(resp.body), "ok", 0.0)
+    QdrantResponse(String(resp.body), "", 0.0)  # plain text, no status field
 end
 
 # ── Issues ───────────────────────────────────────────────────────────────
