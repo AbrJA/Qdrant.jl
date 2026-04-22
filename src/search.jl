@@ -19,6 +19,7 @@ search_points(client, "my_col"; vector=Float32[1,0,0,0], limit=5, with_payload=t
 ```
 """
 function search_points(c::QdrantConnection, collection::AbstractString, req::SearchRequest)
+    is_grpc(c) && return search_points(c, collection, req, Val(:grpc))
     execute(HTTP.post, c, search_path(collection) * "/search", req)
 end
 search_points(collection::AbstractString, req::SearchRequest) =
@@ -35,6 +36,7 @@ Execute multiple searches in one call.
 """
 function search_batch(c::QdrantConnection, collection::AbstractString,
                       requests::AbstractVector{SearchRequest})
+    is_grpc(c) && return search_batch(c, collection, requests, Val(:grpc))
     body = Dict{String,Any}("searches" => collect(requests))
     execute(HTTP.post, c, search_path(collection) * "/search/batch", body)
 end
@@ -48,6 +50,7 @@ Search with result grouping.
 """
 function search_groups(c::QdrantConnection, collection::AbstractString,
                        req::AbstractDict; group_size::Int=1)
+    is_grpc(c) && return search_groups(c, collection, req, Val(:grpc); group_size)
     body = merge(Dict{String,Any}(req), Dict{String,Any}("group_size" => group_size))
     execute(HTTP.post, c, search_path(collection) * "/search/groups", body)
 end
@@ -63,6 +66,7 @@ search_groups(collection::AbstractString, req::AbstractDict; kw...) =
 Get recommendations from positive/negative examples.
 """
 function recommend_points(c::QdrantConnection, collection::AbstractString, req::RecommendRequest)
+    is_grpc(c) && return recommend_points(c, collection, req, Val(:grpc))
     execute(HTTP.post, c, search_path(collection) * "/recommend", req)
 end
 recommend_points(collection::AbstractString, req::RecommendRequest) =
@@ -79,6 +83,7 @@ Execute multiple recommendations in one call.
 """
 function recommend_batch(c::QdrantConnection, collection::AbstractString,
                          requests::AbstractVector{RecommendRequest})
+    is_grpc(c) && return recommend_batch(c, collection, requests, Val(:grpc))
     body = Dict{String,Any}("searches" => collect(requests))
     execute(HTTP.post, c, search_path(collection) * "/recommend/batch", body)
 end
@@ -92,6 +97,7 @@ Recommendations with grouping.
 """
 function recommend_groups(c::QdrantConnection, collection::AbstractString,
                           req::AbstractDict; group_size::Int=1)
+    is_grpc(c) && return recommend_groups(c, collection, req, Val(:grpc); group_size)
     body = merge(Dict{String,Any}(req), Dict{String,Any}("group_size" => group_size))
     execute(HTTP.post, c, search_path(collection) * "/recommend/groups", body)
 end
@@ -107,6 +113,7 @@ recommend_groups(collection::AbstractString, req::AbstractDict; kw...) =
 Advanced query interface (Qdrant universal query API).
 """
 function query_points(c::QdrantConnection, collection::AbstractString, req::QueryRequest)
+    is_grpc(c) && return query_points(c, collection, req, Val(:grpc))
     execute(HTTP.post, c, search_path(collection) * "/query", req)
 end
 query_points(collection::AbstractString, req::QueryRequest) =
@@ -123,6 +130,7 @@ Execute multiple queries in one call.
 """
 function query_batch(c::QdrantConnection, collection::AbstractString,
                      requests::AbstractVector{QueryRequest})
+    is_grpc(c) && return query_batch(c, collection, requests, Val(:grpc))
     body = Dict{String,Any}("searches" => collect(requests))
     execute(HTTP.post, c, search_path(collection) * "/query/batch", body)
 end
@@ -136,6 +144,7 @@ Query with grouping.
 """
 function query_groups(c::QdrantConnection, collection::AbstractString,
                       req::AbstractDict; group_size::Int=1)
+    is_grpc(c) && return query_groups(c, collection, req, Val(:grpc); group_size)
     body = merge(Dict{String,Any}(req), Dict{String,Any}("group_size" => group_size))
     execute(HTTP.post, c, search_path(collection) * "/query/groups", body)
 end

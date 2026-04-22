@@ -3,14 +3,25 @@
 
 A Julian client for the [Qdrant](https://qdrant.tech) vector database.
 
-Leverages `StructUtils.jl` for zero-cost struct ↔ JSON mapping and an abstract
-transport layer for future gRPC support.
+Supports both HTTP/REST and gRPC transports for maximum flexibility and performance.
+Leverages `StructUtils.jl` for zero-cost struct ↔ JSON mapping and `gRPCClient.jl`
+with `ProtoBuf.jl` for high-performance binary protocol communication.
 
-# Quick Start
+# Quick Start — HTTP (default)
 ```julia
 using QdrantClient
 
-client = QdrantConnection()
+client = QdrantConnection()  # localhost:6333 HTTP
+create_collection(client, "demo", CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+upsert_points(client, "demo", [Point(id=1, vector=Float32[1,0,0,0])])
+query_points(client, "demo", QueryRequest(query=Float32[1,0,0,0], limit=5))
+```
+
+# Quick Start — gRPC (~2-10x faster for bulk operations)
+```julia
+using QdrantClient
+
+client = QdrantConnection(GRPCTransport(host="localhost", port=6334))
 create_collection(client, "demo", CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
 upsert_points(client, "demo", [Point(id=1, vector=Float32[1,0,0,0])])
 query_points(client, "demo", QueryRequest(query=Float32[1,0,0,0], limit=5))
@@ -22,6 +33,7 @@ using HTTP
 using JSON
 using StructUtils
 using UUIDs
+using ProtoBuf: OneOf
 
 const CLIENT_VERSION = "0.3.0"
 
@@ -221,7 +233,17 @@ function execute(method::Function, conn::QdrantConnection, path::AbstractString,
     parse_response(request(method, conn, path, body; query))
 end
 
-# ── API modules ──────────────────────────────────────────────────────────
+# ── gRPC transport type (needed before API files for dispatch) ────────────
+include("grpc_transport.jl")
+
+"""
+    is_grpc(c::QdrantConnection) -> Bool
+
+Check if a connection uses gRPC transport.
+"""
+is_grpc(c::QdrantConnection) = c.transport isa GRPCTransport
+
+# ── API modules (HTTP/REST + gRPC internal dispatch) ─────────────────────
 include("collections.jl")
 include("points.jl")
 include("search.jl")
@@ -230,15 +252,27 @@ include("snapshots.jl")
 include("distributed.jl")
 include("service.jl")
 
+# ── gRPC API implementations ────────────────────────────────────────────
+include("grpc_collections.jl")
+include("grpc_points.jl")
+include("grpc_search.jl")
+include("grpc_discovery.jl")
+include("grpc_snapshots.jl")
+include("grpc_service.jl")
+
 # ============================================================================
 # Exports
 # ============================================================================
 
 # Core
-export QdrantConnection, QdrantConnection, set_client!, get_client, QdrantError
+export QdrantConnection, set_client!, get_client, QdrantError
 
 # Transport
-export AbstractTransport, HTTPTransport
+export AbstractTransport, HTTPTransport, GRPCTransport, is_grpc
+
+# gRPC utilities (for advanced users)
+export to_proto_point, from_proto_scored_point, from_proto_retrieved_point
+export julia_value_to_proto, proto_value_to_julia
 
 # Type hierarchy
 export AbstractQdrantType, AbstractConfig, AbstractRequest, AbstractCondition
@@ -299,10 +333,10 @@ export create_snapshot, list_snapshots, delete_snapshot
 # Service API
 export health_check, get_metrics, get_telemetry
 
+# Payload index API
+export create_payload_index, delete_payload_index
+
 # Distributed API
 export cluster_status
-
-# Payload Index API
-export create_payload_index, delete_payload_index
 
 end # module

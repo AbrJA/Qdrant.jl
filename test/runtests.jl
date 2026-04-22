@@ -1011,3 +1011,6 @@ end
     end
 
 end  # QdrantClient.jl v0.3.0
+
+# ── gRPC Tests ───────────────────────────────────────────────────────────
+include("test_grpc.jl")

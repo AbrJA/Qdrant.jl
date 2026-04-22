@@ -24,6 +24,7 @@ Insert or update points.
 function upsert_points(c::QdrantConnection, collection::AbstractString,
                        points::AbstractVector{<:Point};
                        wait::Bool=true, ordering::AbstractString="weak")
+    is_grpc(c) && return upsert_points(c, collection, points, Val(:grpc); wait, ordering)
     body = Dict{String,Any}("points" => points, "ordering" => ordering)
     execute(HTTP.put, c, points_path(collection), body; query=wait_query(wait))
 end
@@ -43,6 +44,7 @@ Delete points by IDs or filter.
 function delete_points(c::QdrantConnection, collection::AbstractString,
                        selector::Union{AbstractVector{<:PointId}, PointId, Filter};
                        wait::Bool=true)
+    is_grpc(c) && return delete_points(c, collection, selector, Val(:grpc); wait)
     execute(HTTP.post, c, points_path(collection) * "/delete",
             point_selector(selector); query=wait_query(wait))
 end
@@ -58,6 +60,7 @@ Retrieve points by ID(s).
 function get_points(c::QdrantConnection, collection::AbstractString,
                     ids::AbstractVector{<:PointId};
                     with_vectors::Bool=false, with_payload::Bool=true)
+    is_grpc(c) && return get_points(c, collection, ids, Val(:grpc); with_vectors, with_payload)
     body = Dict{String,Any}(
         "ids" => collect(ids),
         "with_vectors" => with_vectors,
@@ -82,6 +85,7 @@ Set payload fields on selected points.
 function set_payload(c::QdrantConnection, collection::AbstractString, payload::AbstractDict,
                      selector::Union{AbstractVector{<:PointId}, PointId, Filter};
                      wait::Bool=true)
+    is_grpc(c) && return set_payload(c, collection, payload, selector, Val(:grpc); wait)
     body = merge(Dict{String,Any}("payload" => payload), point_selector(selector))
     execute(HTTP.post, c, points_path(collection) * "/payload", body; query=wait_query(wait))
 end
@@ -97,6 +101,7 @@ function delete_payload(c::QdrantConnection, collection::AbstractString,
                         keys::AbstractVector{<:AbstractString},
                         selector::Union{AbstractVector{<:PointId}, PointId, Filter};
                         wait::Bool=true)
+    is_grpc(c) && return delete_payload(c, collection, keys, selector, Val(:grpc); wait)
     body = merge(Dict{String,Any}("keys" => collect(keys)), point_selector(selector))
     execute(HTTP.post, c, points_path(collection) * "/payload/delete", body;
             query=wait_query(wait))
@@ -112,6 +117,7 @@ Remove all payload from selected points.
 function clear_payload(c::QdrantConnection, collection::AbstractString,
                        selector::Union{AbstractVector{<:PointId}, PointId, Filter};
                        wait::Bool=true)
+    is_grpc(c) && return clear_payload(c, collection, selector, Val(:grpc); wait)
     execute(HTTP.post, c, points_path(collection) * "/payload/clear",
             point_selector(selector); query=wait_query(wait))
 end
@@ -129,6 +135,7 @@ Update vectors for existing points.
 """
 function update_vectors(c::QdrantConnection, collection::AbstractString,
                         points::AbstractVector; wait::Bool=true)
+    is_grpc(c) && return update_vectors(c, collection, points, Val(:grpc); wait)
     body = Dict{String,Any}("points" => collect(points))
     execute(HTTP.put, c, points_path(collection) * "/vectors", body; query=wait_query(wait))
 end
@@ -144,6 +151,7 @@ function delete_vectors(c::QdrantConnection, collection::AbstractString,
                         names::AbstractVector{<:AbstractString},
                         selector::Union{AbstractVector{<:PointId}, PointId, Filter};
                         wait::Bool=true)
+    is_grpc(c) && return delete_vectors(c, collection, names, selector, Val(:grpc); wait)
     body = merge(Dict{String,Any}("vector" => collect(names)), point_selector(selector))
     execute(HTTP.post, c, points_path(collection) * "/vectors/delete", body;
             query=wait_query(wait))
@@ -164,6 +172,7 @@ function scroll_points(c::QdrantConnection, collection::AbstractString;
                        filter::Optional{Filter}=nothing,
                        limit::Int=10, offset=nothing,
                        with_vectors::Bool=false, with_payload::Bool=true)
+    is_grpc(c) && return scroll_points(c, collection, Val(:grpc); filter, limit, offset, with_vectors, with_payload)
     body = Dict{String,Any}(
         "limit" => limit,
         "with_vectors" => with_vectors,
@@ -183,6 +192,7 @@ Count points in a collection.
 """
 function count_points(c::QdrantConnection, collection::AbstractString;
                       filter::Optional{Filter}=nothing, exact::Bool=false)
+    is_grpc(c) && return count_points(c, collection, Val(:grpc); filter, exact)
     body = Dict{String,Any}("exact" => exact)
     filter !== nothing && (body["filter"] = filter)
     execute(HTTP.post, c, points_path(collection) * "/count", body)
@@ -220,6 +230,7 @@ function create_payload_index(c::QdrantConnection, collection::AbstractString,
                               field_name::AbstractString;
                               field_schema::Union{String, AbstractQdrantType, AbstractDict, Nothing}=nothing,
                               wait::Bool=true)
+    is_grpc(c) && return create_payload_index(c, collection, field_name, Val(:grpc); field_schema, wait)
     body = Dict{String,Any}("field_name" => field_name)
     if field_schema !== nothing
         body["field_schema"] = field_schema
@@ -237,6 +248,7 @@ Delete an index on a payload field.
 """
 function delete_payload_index(c::QdrantConnection, collection::AbstractString,
                               field_name::AbstractString; wait::Bool=true)
+    is_grpc(c) && return delete_payload_index(c, collection, field_name, Val(:grpc); wait)
     execute(HTTP.delete, c, collection_path(collection) * "/index/$field_name";
             query=wait_query(wait))
 end

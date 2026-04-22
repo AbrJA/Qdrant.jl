@@ -8,6 +8,7 @@
 Create a snapshot of a collection.
 """
 function create_snapshot(c::QdrantConnection, collection::AbstractString)
+    is_grpc(c) && return create_snapshot(c, collection, Val(:grpc))
     execute(HTTP.post, c, "/collections/$collection/snapshots")
 end
 create_snapshot(collection::AbstractString) = create_snapshot(get_client(), collection)
@@ -18,6 +19,7 @@ create_snapshot(collection::AbstractString) = create_snapshot(get_client(), coll
 List all snapshots for a collection.
 """
 function list_snapshots(c::QdrantConnection, collection::AbstractString)
+    is_grpc(c) && return list_snapshots(c, collection, Val(:grpc))
     result = execute(HTTP.get, c, "/collections/$collection/snapshots")
     result isa AbstractVector ? result : get(result, "snapshots", Any[])
 end
@@ -29,6 +31,7 @@ list_snapshots(collection::AbstractString) = list_snapshots(get_client(), collec
 Delete a snapshot.
 """
 function delete_snapshot(c::QdrantConnection, collection::AbstractString, name::AbstractString)
+    is_grpc(c) && return delete_snapshot(c, collection, name, Val(:grpc))
     execute(HTTP.delete, c, "/collections/$collection/snapshots/$name")
 end
 delete_snapshot(collection::AbstractString, name::AbstractString) =

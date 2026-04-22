@@ -9,6 +9,7 @@ Check server health by probing the collections endpoint.
 Returns a Dict with `"status"` ("healthy" or "unhealthy").
 """
 function health_check(c::QdrantConnection=get_client())
+    is_grpc(c) && return health_check(c, Val(:grpc))
     try
         resp = execute(HTTP.get, c, "/collections")
         Dict{String,Any}("status" => "healthy", "response" => resp)
