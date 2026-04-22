@@ -41,8 +41,9 @@ end
 
 Retrieve Prometheus-format metrics (plain text response).
 """
-function get_metrics(conn::QdrantConnection{HTTPTransport}=get_client())
-    resp = http_request(HTTP.get, conn, "/metrics")
+function get_metrics(conn::QdrantConnection{HTTPTransport}=get_client();
+                     timeout::Optional{Int}=nothing)
+    resp = http_request(HTTP.get, conn, "/metrics"; query=_timeout_query(timeout))
     QdrantResponse(String(resp.body), "", 0.0)  # plain text, no status field
 end
 
@@ -51,8 +52,9 @@ end
 
 Retrieve telemetry data.
 """
-function get_telemetry(conn::QdrantConnection{HTTPTransport}=get_client())
-    resp = http_request(HTTP.get, conn, "/telemetry")
+function get_telemetry(conn::QdrantConnection{HTTPTransport}=get_client();
+                       timeout::Optional{Int}=nothing)
+    resp = http_request(HTTP.get, conn, "/telemetry"; query=_timeout_query(timeout))
     raw, status, time = _unwrap(resp)
     QdrantResponse(raw isa AbstractDict ? raw : Dict{String,Any}(), status, time)
 end

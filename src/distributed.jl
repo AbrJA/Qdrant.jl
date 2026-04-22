@@ -18,8 +18,10 @@ end
 
 Get cluster-wide telemetry (peers, collections, shard transfers).
 """
-function cluster_telemetry(conn::QdrantConnection{HTTPTransport}=get_client())
-    resp = http_request(HTTP.get, conn, "/cluster/telemetry")
+function cluster_telemetry(conn::QdrantConnection{HTTPTransport}=get_client();
+                           timeout::Optional{Int}=nothing)
+    resp = http_request(HTTP.get, conn, "/cluster/telemetry";
+                        query=_timeout_query(timeout))
     raw, status, time = _unwrap(resp)
     QdrantResponse(raw isa AbstractDict ? raw : Dict{String,Any}(), status, time)
 end
@@ -38,8 +40,12 @@ end
 
 Remove a peer from the cluster. Fails if peer still has shards.
 """
-function remove_peer(conn::QdrantConnection{HTTPTransport}, peer_id::Integer; force::Bool=false)
-    kw = force ? (; query=Dict("force" => "true")) : (;)
+function remove_peer(conn::QdrantConnection{HTTPTransport}, peer_id::Integer;
+                     force::Bool=false, timeout::Optional{Int}=nothing)
+    q = Dict{String,Any}()
+    force && (q["force"] = "true")
+    timeout !== nothing && (q["timeout"] = timeout)
+    kw = isempty(q) ? (;) : (; query=q)
     parse_bool(http_request(HTTP.delete, conn, "/cluster/peer/$peer_id"; kw...))
 end
 
@@ -61,11 +67,13 @@ collection_cluster_info(name::AbstractString) = collection_cluster_info(get_clie
 Update collection cluster configuration (move/replicate shards).
 """
 function update_collection_cluster(conn::QdrantConnection{HTTPTransport},
-                                   name::AbstractString, body::AbstractDict)
-    parse_bool(http_request(HTTP.post, conn, "/collections/$name/cluster", body))
+                                   name::AbstractString, body::AbstractDict;
+                                   timeout::Optional{Int}=nothing)
+    parse_bool(http_request(HTTP.post, conn, "/collections/$name/cluster", body;
+                            query=_timeout_query(timeout)))
 end
-update_collection_cluster(name::AbstractString, body::AbstractDict) =
-    update_collection_cluster(get_client(), name, body)
+update_collection_cluster(name::AbstractString, body::AbstractDict; kwargs...) =
+    update_collection_cluster(get_client(), name, body; kwargs...)
 
 # ── Shard Keys ───────────────────────────────────────────────────────────
 
@@ -87,11 +95,13 @@ list_shard_keys(name::AbstractString) = list_shard_keys(get_client(), name)
 Create a shard key for a collection.
 """
 function create_shard_key(conn::QdrantConnection{HTTPTransport},
-                          name::AbstractString, body::AbstractDict)
-    parse_bool(http_request(HTTP.put, conn, "/collections/$name/shards", body))
+                          name::AbstractString, body::AbstractDict;
+                          timeout::Optional{Int}=nothing)
+    parse_bool(http_request(HTTP.put, conn, "/collections/$name/shards", body;
+                            query=_timeout_query(timeout)))
 end
-create_shard_key(name::AbstractString, body::AbstractDict) =
-    create_shard_key(get_client(), name, body)
+create_shard_key(name::AbstractString, body::AbstractDict; kwargs...) =
+    create_shard_key(get_client(), name, body; kwargs...)
 
 """
     delete_shard_key(conn, collection, request) -> QdrantResponse{Bool}
@@ -99,11 +109,13 @@ create_shard_key(name::AbstractString, body::AbstractDict) =
 Delete a shard key from a collection.
 """
 function delete_shard_key(conn::QdrantConnection{HTTPTransport},
-                          name::AbstractString, body::AbstractDict)
-    parse_bool(http_request(HTTP.post, conn, "/collections/$name/shards/delete", body))
+                          name::AbstractString, body::AbstractDict;
+                          timeout::Optional{Int}=nothing)
+    parse_bool(http_request(HTTP.post, conn, "/collections/$name/shards/delete", body;
+                            query=_timeout_query(timeout)))
 end
-delete_shard_key(name::AbstractString, body::AbstractDict) =
-    delete_shard_key(get_client(), name, body)
+delete_shard_key(name::AbstractString, body::AbstractDict; kwargs...) =
+    delete_shard_key(get_client(), name, body; kwargs...)
 
 # ── Shard Snapshots ──────────────────────────────────────────────────────
 

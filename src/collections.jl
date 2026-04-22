@@ -35,13 +35,16 @@ create_collection(conn, "demo"; vectors=VectorParams(size=4, distance=Dot))
 ```
 """
 function create_collection(conn::QdrantConnection{HTTPTransport}, name::AbstractString,
-                           config::CollectionConfig)
-    parse_bool(http_request(HTTP.put, conn, _collection_path(name), config))
+                           config::CollectionConfig; timeout::Optional{Int}=nothing)
+    parse_bool(http_request(HTTP.put, conn, _collection_path(name), config;
+                            query=_timeout_query(timeout)))
 end
-create_collection(name::AbstractString, config::CollectionConfig) =
-    create_collection(get_client(), name, config)
-create_collection(conn::QdrantConnection, name::AbstractString; kwargs...) =
-    create_collection(conn, name, CollectionConfig(; kwargs...))
+create_collection(name::AbstractString, config::CollectionConfig; kwargs...) =
+    create_collection(get_client(), name, config; kwargs...)
+function create_collection(conn::QdrantConnection, name::AbstractString;
+                           timeout::Optional{Int}=nothing, kwargs...)
+    create_collection(conn, name, CollectionConfig(; kwargs...); timeout=timeout)
+end
 create_collection(name::AbstractString; kwargs...) =
     create_collection(get_client(), name; kwargs...)
 
@@ -52,10 +55,12 @@ create_collection(name::AbstractString; kwargs...) =
 
 Delete a collection.
 """
-function delete_collection(conn::QdrantConnection{HTTPTransport}, name::AbstractString)
-    parse_bool(http_request(HTTP.delete, conn, _collection_path(name)))
+function delete_collection(conn::QdrantConnection{HTTPTransport}, name::AbstractString;
+                           timeout::Optional{Int}=nothing)
+    parse_bool(http_request(HTTP.delete, conn, _collection_path(name);
+                            query=_timeout_query(timeout)))
 end
-delete_collection(name::AbstractString) = delete_collection(get_client(), name)
+delete_collection(name::AbstractString; kwargs...) = delete_collection(get_client(), name; kwargs...)
 
 # ── Exists ───────────────────────────────────────────────────────────────
 
@@ -95,13 +100,16 @@ get_collection(name::AbstractString) = get_collection(get_client(), name)
 Update collection parameters.
 """
 function update_collection(conn::QdrantConnection{HTTPTransport}, name::AbstractString,
-                           config::CollectionUpdate)
-    parse_bool(http_request(HTTP.patch, conn, _collection_path(name), config))
+                           config::CollectionUpdate; timeout::Optional{Int}=nothing)
+    parse_bool(http_request(HTTP.patch, conn, _collection_path(name), config;
+                            query=_timeout_query(timeout)))
 end
-update_collection(name::AbstractString, config::CollectionUpdate) =
-    update_collection(get_client(), name, config)
-update_collection(conn::QdrantConnection, name::AbstractString; kwargs...) =
-    update_collection(conn, name, CollectionUpdate(; kwargs...))
+update_collection(name::AbstractString, config::CollectionUpdate; kwargs...) =
+    update_collection(get_client(), name, config; kwargs...)
+function update_collection(conn::QdrantConnection, name::AbstractString;
+                           timeout::Optional{Int}=nothing, kwargs...)
+    update_collection(conn, name, CollectionUpdate(; kwargs...); timeout=timeout)
+end
 update_collection(name::AbstractString; kwargs...) =
     update_collection(get_client(), name; kwargs...)
 
@@ -160,31 +168,35 @@ list_collection_aliases(name::AbstractString) =
     create_alias(conn, alias, collection) -> QdrantResponse{Bool}
 """
 function create_alias(conn::QdrantConnection{HTTPTransport}, alias::AbstractString,
-                      collection::AbstractString)
+                      collection::AbstractString; timeout::Optional{Int}=nothing)
     body = _alias_action("create_alias",
         Dict("collection_name" => collection, "alias_name" => alias))
-    parse_bool(http_request(HTTP.post, conn, "/collections/aliases", body))
+    parse_bool(http_request(HTTP.post, conn, "/collections/aliases", body;
+                            query=_timeout_query(timeout)))
 end
-create_alias(alias::AbstractString, collection::AbstractString) =
-    create_alias(get_client(), alias, collection)
+create_alias(alias::AbstractString, collection::AbstractString; kwargs...) =
+    create_alias(get_client(), alias, collection; kwargs...)
 
 """
     delete_alias(conn, alias) -> QdrantResponse{Bool}
 """
-function delete_alias(conn::QdrantConnection{HTTPTransport}, alias::AbstractString)
+function delete_alias(conn::QdrantConnection{HTTPTransport}, alias::AbstractString;
+                      timeout::Optional{Int}=nothing)
     body = _alias_action("delete_alias", Dict("alias_name" => alias))
-    parse_bool(http_request(HTTP.post, conn, "/collections/aliases", body))
+    parse_bool(http_request(HTTP.post, conn, "/collections/aliases", body;
+                            query=_timeout_query(timeout)))
 end
-delete_alias(alias::AbstractString) = delete_alias(get_client(), alias)
+delete_alias(alias::AbstractString; kwargs...) = delete_alias(get_client(), alias; kwargs...)
 
 """
     rename_alias(conn, old, new_name) -> QdrantResponse{Bool}
 """
 function rename_alias(conn::QdrantConnection{HTTPTransport}, old::AbstractString,
-                      new_name::AbstractString)
+                      new_name::AbstractString; timeout::Optional{Int}=nothing)
     body = _alias_action("rename_alias",
         Dict("old_alias_name" => old, "new_alias_name" => new_name))
-    parse_bool(http_request(HTTP.post, conn, "/collections/aliases", body))
+    parse_bool(http_request(HTTP.post, conn, "/collections/aliases", body;
+                            query=_timeout_query(timeout)))
 end
-rename_alias(old::AbstractString, new_name::AbstractString) =
-    rename_alias(get_client(), old, new_name)
+rename_alias(old::AbstractString, new_name::AbstractString; kwargs...) =
+    rename_alias(get_client(), old, new_name; kwargs...)

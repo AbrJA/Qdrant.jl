@@ -96,6 +96,8 @@ function transport_url(t::HTTPTransport, path::AbstractString)
     "$(base_url(t))/$p"
 end
 
+_timeout_query(timeout::Optional{Int}) = timeout === nothing ? nothing : Dict("timeout" => timeout)
+
 # ============================================================================
 # QdrantConnection{T} — parametric on transport for dispatch
 # ============================================================================
@@ -193,6 +195,8 @@ function http_request(method::Function, conn::QdrantConnection{HTTPTransport},
     kw = Dict{Symbol,Any}(
         :pool             => ensure_pool!(transport),
         :headers          => transport_headers(transport),
+        :readtimeout      => transport.timeout,
+        :connect_timeout  => transport.timeout,
         :status_exception => false,
     )
     query !== nothing && (kw[:query] = query)

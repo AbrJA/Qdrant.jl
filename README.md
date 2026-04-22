@@ -323,7 +323,7 @@ end
 
 ## Requirements
 
-- Julia 1.10+
+- Julia 1.12+
 - Qdrant server (tested with v1.9+)
 - HTTP.jl, JSON.jl, StructUtils.jl
 - For gRPC: ProtoBuf.jl, gRPCClient.jl

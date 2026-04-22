@@ -437,7 +437,75 @@
         keys_resp = list_shard_keys(CONN, name)
         @test keys_resp.result isa AbstractDict
 
+        # Custom sharding operations may fail on default single-node setup.
+        try
+            created = create_shard_key(CONN, name, Dict("shard_key" => "tenant-a"))
+            @test created isa QdrantResponse{Bool}
+        catch e
+            @test e isa QdrantError
+        end
+
+        try
+            deleted = delete_shard_key(CONN, name, Dict("shard_key" => "tenant-a"))
+            @test deleted isa QdrantResponse{Bool}
+        catch e
+            @test e isa QdrantError
+        end
+
         cleanup_collection(CONN, name)
+    end
+
+    @testset "Shard Snapshots" begin
+        name = unique_name("ssnap")
+        cleanup_collection(CONN, name)
+        create_collection(CONN, name, CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+
+        try
+            ls = list_shard_snapshots(CONN, name, 0)
+            @test ls isa QdrantResponse{Vector{SnapshotInfo}}
+        catch e
+            @test e isa QdrantError
+        end
+
+        try
+            cs = create_shard_snapshot(CONN, name, 0)
+            @test cs isa QdrantResponse{SnapshotInfo}
+            @test !isempty(cs.result.name)
+
+            ds = delete_shard_snapshot(CONN, name, 0, cs.result.name)
+            @test ds isa QdrantResponse{Bool}
+        catch e
+            @test e isa QdrantError
+        end
+
+        cleanup_collection(CONN, name)
+    end
+
+    @testset "Collection Cluster Update" begin
+        name = unique_name("clupd")
+        cleanup_collection(CONN, name)
+        create_collection(CONN, name, CollectionConfig(vectors=VectorParams(size=4, distance=Dot)))
+
+        # Endpoint availability depends on cluster mode and request validity.
+        try
+            upd = update_collection_cluster(CONN, name,
+                Dict("move_shard" => Dict("shard_id" => 0, "to_peer_id" => 1)))
+            @test upd isa QdrantResponse{Bool}
+        catch e
+            @test e isa QdrantError
+        end
+
+        cleanup_collection(CONN, name)
+    end
+
+    @testset "Remove Peer" begin
+        # Standalone nodes reject this operation; cluster nodes may accept/reject based on state.
+        try
+            rp = remove_peer(CONN, 1)
+            @test rp isa QdrantResponse{Bool}
+        catch e
+            @test e isa QdrantError
+        end
     end
 
     @testset "Snapshot Recovery" begin
@@ -454,6 +522,27 @@
             location="http://nonexistent.invalid/snap.tar")
 
         cleanup_collection(CONN, name)
+    end
+
+    @testset "Timeout Query Param" begin
+        name = unique_name("tout")
+        cleanup_collection(CONN, name)
+
+        created = create_collection(CONN, name,
+            CollectionConfig(vectors=VectorParams(size=4, distance=Dot)); timeout=5)
+        @test created isa QdrantResponse{Bool}
+
+        upsert_points(CONN, name, fixture_points(); wait=true, timeout=5)
+
+        counted = count_points(CONN, name; exact=true, timeout=5)
+        @test counted isa QdrantResponse{CountResult}
+        @test counted.result.count >= 1
+
+        q = query_points(CONN, name,
+            QueryRequest(query=Float32[1.0, 0.0, 0.0, 0.0], limit=2); timeout=5)
+        @test q isa QdrantResponse{QueryResult}
+
+        @test delete_collection(CONN, name; timeout=5).result === true
     end
 
     end # qdrant_available

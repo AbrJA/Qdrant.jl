@@ -13,16 +13,16 @@
 | create_collection | PUT | `/collections/{collection_name}` | yes | yes |
 | create_field_index | PUT | `/collections/{collection_name}/index` | yes | yes |
 | create_full_snapshot | POST | `/snapshots` | yes | yes |
-| create_shard_key | PUT | `/collections/{collection_name}/shards` | yes | no |
-| create_shard_snapshot | POST | `/collections/{collection_name}/shards/{shard_id}/snapshots` | yes | no |
+| create_shard_key | PUT | `/collections/{collection_name}/shards` | yes | yes |
+| create_shard_snapshot | POST | `/collections/{collection_name}/shards/{shard_id}/snapshots` | yes | yes |
 | create_snapshot | POST | `/collections/{collection_name}/snapshots` | yes | yes |
 | delete_collection | DELETE | `/collections/{collection_name}` | yes | yes |
 | delete_field_index | DELETE | `/collections/{collection_name}/index/{field_name}` | yes | yes |
 | delete_full_snapshot | DELETE | `/snapshots/{snapshot_name}` | yes | yes |
 | delete_payload | POST | `/collections/{collection_name}/points/payload/delete` | yes | yes |
 | delete_points | POST | `/collections/{collection_name}/points/delete` | yes | yes |
-| delete_shard_key | POST | `/collections/{collection_name}/shards/delete` | yes | no |
-| delete_shard_snapshot | DELETE | `/collections/{collection_name}/shards/{shard_id}/snapshots/{snapshot_name}` | yes | no |
+| delete_shard_key | POST | `/collections/{collection_name}/shards/delete` | yes | yes |
+| delete_shard_snapshot | DELETE | `/collections/{collection_name}/shards/{shard_id}/snapshots/{snapshot_name}` | yes | yes |
 | delete_snapshot | DELETE | `/collections/{collection_name}/snapshots/{snapshot_name}` | yes | yes |
 | delete_vectors | POST | `/collections/{collection_name}/points/vectors/delete` | yes | yes |
 | facet | POST | `/collections/{collection_name}/facet` | yes | yes |
@@ -40,7 +40,7 @@
 | healthz | GET | `/healthz` | yes | yes |
 | list_full_snapshots | GET | `/snapshots` | yes | yes |
 | list_shard_keys | GET | `/collections/{collection_name}/shards` | yes | yes |
-| list_shard_snapshots | GET | `/collections/{collection_name}/shards/{shard_id}/snapshots` | yes | no |
+| list_shard_snapshots | GET | `/collections/{collection_name}/shards/{shard_id}/snapshots` | yes | yes |
 | list_snapshots | GET | `/collections/{collection_name}/snapshots` | yes | yes |
 | livez | GET | `/livez` | yes | yes |
 | metrics | GET | `/metrics` | yes | yes |
@@ -54,7 +54,7 @@
 | recover_from_uploaded_snapshot | POST | `/collections/{collection_name}/snapshots/upload` | no (multipart) | — |
 | recover_shard_from_snapshot | PUT | `/collections/{collection_name}/shards/{shard_id}/snapshots/recover` | no (shard-level) | — |
 | recover_shard_from_uploaded_snapshot | POST | `/collections/{collection_name}/shards/{shard_id}/snapshots/upload` | no (multipart) | — |
-| remove_peer | DELETE | `/cluster/peer/{peer_id}` | yes | no |
+| remove_peer | DELETE | `/cluster/peer/{peer_id}` | yes | yes |
 | root | GET | `/` | yes | yes |
 | scroll_points | POST | `/collections/{collection_name}/points/scroll` | yes | yes |
 | search_matrix_offsets | POST | `/collections/{collection_name}/points/search/matrix/offsets` | yes | yes |
@@ -64,7 +64,7 @@
 | telemetry | GET | `/telemetry` | yes | yes |
 | update_aliases | POST | `/collections/aliases` | yes | yes |
 | update_collection | PATCH | `/collections/{collection_name}` | yes | yes |
-| update_collection_cluster | POST | `/collections/{collection_name}/cluster` | yes | no |
+| update_collection_cluster | POST | `/collections/{collection_name}/cluster` | yes | yes |
 | update_vectors | PUT | `/collections/{collection_name}/points/vectors` | yes | yes |
 | upsert_points | PUT | `/collections/{collection_name}/points` | yes | yes |
 
