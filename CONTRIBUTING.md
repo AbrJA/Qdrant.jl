@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for contributing to QdrantClient.jl.
+Thank you for contributing to Qdrant.jl.
 
 ## Development Setup
 
