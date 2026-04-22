@@ -20,7 +20,12 @@ const GRPC_CONN = QdrantClient(GRPCTransport())
 const HTTP_CONN = QdrantClient()
 
 function grpc_available(client::QdrantClient=GRPC_CONN)
-    try; health_check(client); true; catch; false; end
+    try
+        list_collections(client)
+        true
+    catch
+        false
+    end
 end
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -165,11 +170,13 @@ end
 @testset "gRPC Integration Tests" begin
     if !grpc_available()
         @warn "Qdrant gRPC not available on port 6334, skipping"
+        @test_skip "Qdrant gRPC not available"
     else
 
     @testset "Health Check (gRPC)" begin
         result = health_check(GRPC_CONN)
         @test result isa QdrantResponse{HealthInfo}
+        @test result.status == "ok"
         @test contains(result.result.title, "qdrant")
     end
 
