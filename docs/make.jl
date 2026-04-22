@@ -3,6 +3,7 @@ using Documenter, QdrantClient
 makedocs(
     modules  = [QdrantClient],
     sitename = "QdrantClient.jl",
+    checkdocs = :exports,
     format   = Documenter.HTML(prettyurls = get(ENV, "CI", nothing) == "true"),
     pages    = ["Home" => "index.md"],
 )

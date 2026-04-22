@@ -24,11 +24,28 @@ Every API call returns [`QdrantResponse{T}`](@ref) with `.result`, `.status`, an
 ## API
 
 ```@docs
+QdrantClient
 QdrantConnection
+AbstractTransport
+HTTPTransport
+GRPCTransport
 QdrantResponse
 QdrantError
 set_client!
 get_client
+serialize_body
+```
+
+### Type Hierarchy
+
+```@docs
+AbstractQdrantType
+AbstractConfig
+AbstractCondition
+AbstractResponse
+Optional
+PointId
+Distance
 ```
 
 ### Collections
@@ -40,6 +57,7 @@ delete_collection
 collection_exists
 get_collection
 update_collection
+get_collection_optimizations
 ```
 
 ### Aliases
@@ -76,6 +94,8 @@ delete_vectors
 query_points
 query_batch
 query_groups
+search_matrix_pairs
+search_matrix_offsets
 facet
 ```
 
@@ -143,13 +163,35 @@ delete_payload_index
 
 ```@docs
 CollectionConfig
+CollectionUpdate
 VectorParams
+SparseVectorParams
 HnswConfig
+WalConfig
 OptimizersConfig
+CollectionParamsDiff
 SearchParams
+QuantizationSearchParams
+ScalarQuantization
+ScalarQuantizationConfig
+ProductQuantization
+ProductQuantizationConfig
+BinaryQuantization
+BinaryQuantizationConfig
+QuantizationConfig
+LookupLocation
+TextIndexParams
 Point
+NamedVector
 Filter
 FieldCondition
+MatchValue
+MatchAny
+MatchText
+RangeCondition
+HasIdCondition
+IsEmptyCondition
+IsNullCondition
 QueryRequest
 UpdateResult
 CountResult
@@ -157,6 +199,24 @@ ScoredPoint
 Record
 ScrollResult
 QueryResult
+GroupResult
+GroupsResult
 SnapshotInfo
 HealthInfo
+CollectionDescription
+AliasDescription
+FacetHit
+FacetResult
+SearchMatrixPairsResponse
+SearchMatrixOffsetsResponse
+```
+
+## Advanced
+
+```@docs
+to_proto_point
+from_proto_scored_point
+from_proto_retrieved_point
+julia_value_to_proto
+proto_value_to_julia
 ```
